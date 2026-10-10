@@ -173,7 +173,9 @@ if (( procs == 1 )); then ok "only the workload's own process"; else nok "$procs
 
 # ---------------------------------------------------------------- 11
 t "names: a declared name resolves and is reachable over end-to-end TLS, no proxy, no CA"
-if can_dns ztst-dev api.github.com && can_http ztst-dev https://api.github.com/zen; then ok "api.github.com 200 over TLS"; else nok "github unreachable (internet on this host?)"; fi
+# github.com (a page, no anonymous rate limit) rather than api.github.com/zen,
+# which shared CI egress addresses exhaust.
+if can_dns ztst-dev api.github.com && can_http ztst-dev https://github.com/; then ok "github.com 200 over TLS"; else nok "github unreachable (internet on this host?): dns=[$(docker exec ztst-dev nslookup api.github.com 2>&1 | tail -3 | tr '\n' ' ')] http=[$(docker exec ztst-dev wget -S --spider -T6 https://github.com/ 2>&1 | grep -E 'HTTP/|error|bad' | head -2 | tr '\n' ' ')] resolver=[$(docker exec ztst-dev cat /etc/resolv.conf | tr '\n' ' ')]"; fi
 
 # ---------------------------------------------------------------- 12
 t "names: an undeclared name does not resolve and no packet leaves"
