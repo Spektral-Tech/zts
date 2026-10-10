@@ -1,5 +1,6 @@
 // The same top bar on every page. `current` marks where the reader is.
 export const NAV = [
+  { href: 'index.html#why', label: 'Why', key: 'why' },
   { href: 'index.html#start', label: 'Start', key: 'start' },
   { href: 'index.html#model', label: 'Model', key: 'model' },
   { href: 'index.html#manifesto', label: 'Manifesto', key: 'manifesto' },

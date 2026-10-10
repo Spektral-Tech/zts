@@ -25,9 +25,9 @@ if [[ -e site/brand-mark.png ]]; then
   size=$(wc -c < site/brand-mark.png)
   (( size <= 80000 )) || { echo "site/brand-mark.png is $size bytes (max 80000)"; fail=1; }
 fi
-# Static assets are cache-busted with the current version.
-v=$(cat VERSION)
-grep -q "styles.css?v=$v" site/index.html site/spec.html || { echo "stylesheet link is not versioned with $v"; fail=1; }
+# Static assets are cache-busted by content hash.
+h=$(shasum -a 256 site/styles.css 2>/dev/null | cut -c1-10 || sha256sum site/styles.css | cut -c1-10)
+grep -q "styles.css?v=$h" site/index.html site/spec.html || { echo "stylesheet link does not carry the content hash $h"; fail=1; }
 
 # The quickstart on the site must be the commands two-minutes.sh runs.
 norm() { sed 's/<[^>]*>//g; s/^\$ //; s/\\$//; s/^ *//; s/"\$IMAGE"/ghcr.io\/spektral-tech\/zts/; s/\$TTY/-it/; s/\${ZTS_PRESET:+-e ZTS_PRESET} //' | grep -E '^(docker run|-v )' | tr -s ' ' | sed 's/ *$//'; }

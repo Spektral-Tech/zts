@@ -1,5 +1,6 @@
 import { Layout } from '../components/Layout.jsx';
 import { Section, CodePanel } from '../components/Section.jsx';
+import { Why } from '../components/Why.jsx';
 
 const IMAGE = 'ghcr.io/spektral-tech/zts';
 
@@ -99,11 +100,11 @@ const MANIFESTO = [
 
 const Raw = ({ as: Tag = 'p', html, ...rest }) => <Tag {...rest} dangerouslySetInnerHTML={{ __html: html }} />;
 
-export function Home({ version }) {
+export function Home({ version, assets }) {
   return (
     <Layout title="ZTS — the network is derived state"
             description="ZTS gives each container only the network paths its profile declares. No proxy, no SDK, no ambient trust. One docker run."
-            current="home" version={version}>
+            current="home" version={version} assets={assets}>
       <main id="main">
         <section class="hero" id="top">
           <p class="eyebrow">ZTS / v{version} · PRE-RELEASE</p>
@@ -111,12 +112,14 @@ export function Home({ version }) {
           <p class="lede">ZTS gives any unmodified container only the network paths its profile declares. By name, by port, by transport. No proxy, no SDK, no CA, no ambient trust. Everything else is unreachable by construction.</p>
           <div class="hero-actions">
             <a class="primary" href="#start">Start in two minutes</a>
-            <a href="reference.html">Read the docs</a>
+            <a href="#why">Is this for me?</a>
           </div>
           <div class="axiom" aria-label="Zero trust axioms">
             <span>identity proves origin</span><b>≠</b><strong>trust</strong><b>·</b><span>no grant</span><b>→</b><strong>no path</strong>
           </div>
         </section>
+
+        <Why />
 
         <Section id="start" cls="start" eyebrow="TWO MINUTES / ONLY DOCKER"
                  title="Four commands. One question. Nothing installed on the host."

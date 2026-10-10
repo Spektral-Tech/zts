@@ -5,6 +5,7 @@ import { build } from 'esbuild';
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, statSync, rmSync, copyFileSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const OUT = join(ROOT, 'site');
@@ -26,10 +27,17 @@ await build({
 });
 const { pages } = await import(pathToFileURL(bundle).href + `?t=${Date.now()}`);
 
-const files = new Map(); // relative path -> Buffer
-for (const [path, html] of Object.entries(pages(ROOT))) files.set(path, Buffer.from('<!doctype html>\n' + html + '\n'));
+// Static assets are cache-busted by content, so a changed stylesheet never
+// meets a stale copy, whatever the release version says.
 const staticDir = join(ROOT, 'web', 'static');
-for (const name of readdirSync(staticDir)) files.set(name, readFileSync(join(staticDir, name)));
+const files = new Map(); // relative path -> Buffer
+const assetHash = {};
+for (const name of readdirSync(staticDir)) {
+  const buf = readFileSync(join(staticDir, name));
+  files.set(name, buf);
+  assetHash[name] = createHash('sha256').update(buf).digest('hex').slice(0, 10);
+}
+for (const [path, html] of Object.entries(pages(ROOT, assetHash))) files.set(path, Buffer.from('<!doctype html>\n' + html + '\n'));
 // published sources offered for download next to the pages
 for (const src of ['MANIFESTO.md', 'SPEC.md', 'REFERENCE.md']) files.set(src, readFileSync(join(ROOT, src)));
 
