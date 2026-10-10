@@ -1,0 +1,139 @@
+name: ci
+# One run per commit on main (or per pull request):
+#   verify  — lint, selftests, unit tests, site build, acceptance suites with
+#             both implementations, the two-minute quickstart with both images
+#   pages   — deploys site/ when verify passed on main
+#   release — builds and pushes the images when the commit carries a tag that
+#             matches VERSION (push main and the tag together; tags alone do
+#             not trigger anything, so there is never a duplicate run)
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      release: ${{ steps.tag.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q shellcheck nftables wireguard-tools dnsmasq jq
+          sudo systemctl disable --now dnsmasq || true
+          sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+      - name: checks
+        run: scripts/run-checks.sh
+      - name: go core
+        run: go build -o bin/zts ./cmd/zts
+      - name: acceptance (bash essentials)
+        run: sudo tests/acceptance/run.sh
+      - name: acceptance (go core)
+        run: sudo ZTS_BIN=./bin/zts tests/acceptance/run.sh
+      - name: images
+        run: docker build -t zts:ci . && docker build -f Dockerfile.bash -t zts:ci-bash .
+      - name: two minutes (go core)
+        run: ZTS_PRESET=coding-agent ZTS_IMAGE=zts:ci scripts/two-minutes.sh
+      - name: two minutes (bash essentials)
+        run: |
+          docker rm -f zts >/dev/null 2>&1 || true
+          docker run --rm --privileged --pid=host --network host -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts zts:ci destroy
+          docker volume rm zts >/dev/null 2>&1 || true
+          ZTS_PRESET=coding-agent ZTS_IMAGE=zts:ci-bash scripts/two-minutes.sh
+      - name: release?
+        id: tag
+        run: |
+          v=$(cat VERSION)
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = push ] && git tag --points-at HEAD | grep -qx "v$v"; then
+            echo "release=true" >> "$GITHUB_OUTPUT"; echo "this commit is v$v: images will be published"
+          else
+            echo "release=false" >> "$GITHUB_OUTPUT"; echo "no v$v tag on this commit: no release"
+          fi
+
+  pages:
+    needs: verify
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  release:
+    needs: verify
+    if: needs.verify.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        run: echo "name=$(echo ghcr.io/${{ github.repository_owner }}/zts | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: go core (default image)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ env.VERSION }}
+            ${{ steps.image.outputs.name }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: bash essentials
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.bash
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ env.VERSION }}-bash
+            ${{ steps.image.outputs.name }}:bash
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.licenses=Apache-2.0

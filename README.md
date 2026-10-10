@@ -113,8 +113,8 @@ To change the site: edit `web/`, then `pnpm install` (once) and `pnpm build`. `r
 ## Repository and image
 
 - source: https://github.com/Spektral-Tech/zts
-- site: deployed to GitHub Pages by the `pages` workflow on every push to `main`
-- image: `ghcr.io/spektral-tech/zts`, built and pushed only by the `release` workflow when a `vX.Y.Z` tag is pushed to the public repository (`:X.Y.Z`, `:latest`; bash essentials as `:X.Y.Z-bash`, `:bash`). Nothing is pushed from a workstation.
+- CI: one workflow, one run per commit on `main`. `verify` runs every check and both acceptance suites; `pages` deploys `site/` when it passes; `release` builds and pushes the images only when the commit carries a `vX.Y.Z` tag equal to `VERSION`.
+- image: `ghcr.io/spektral-tech/zts` (`:X.Y.Z`, `:latest`; bash essentials as `:X.Y.Z-bash`, `:bash`). Nothing is pushed from a workstation.
 
 ## License
 
