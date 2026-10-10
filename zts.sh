@@ -1265,20 +1265,26 @@ reconcile_once() {
 }
 
 run_up() {
-  local line
+  local line since
   if [[ ! -f $MANIFEST && -n ${ZTS_PRESET:-} ]]; then
     run_init >/dev/null
   fi
   [[ -f $MANIFEST ]] || die "manifest not found: $MANIFEST (run '$PROGRAM init' first, or set ZTS_PRESET)"
   info "up: reconciling and watching container events (manifest: $MANIFEST)"
+  # Events are requested from just before each reconcile, so a container that
+  # starts while we are busy (or before the stream is connected) is replayed
+  # by Docker instead of being missed.
+  since=$(date +%s)
   ( reconcile_once ) || warn "initial reconcile failed; will retry on the next event"
   while :; do
-    # The stream ends when Docker restarts; reconnect.
+    # The stream ends when Docker restarts; reconnect from where we left off.
     while IFS= read -r line; do
       [[ -n $line ]] || continue
       info "event: $line"
+      since=$(date +%s)
       ( reconcile_once ) || warn "reconcile failed; will retry on the next event"
     done < <(curl -sN --unix-socket "$DOCKER_SOCK" -G 'http://docker/events' \
+               --data-urlencode "since=$since" \
                --data-urlencode 'filters={"type":["container"],"event":["start","die"],"label":["zts.profile"]}' \
                | jq --unbuffered -r '"\(.Action) \(.Actor.Attributes.name // .Actor.ID[0:12])"' 2>/dev/null)
     warn "event stream closed; reconnecting in 2s"

@@ -126,10 +126,14 @@ type Event struct {
 	Name   string
 }
 
-// Events streams start/die events of labeled containers until ctx ends or
-// the connection closes.
-func (c *Client) Events(ctx context.Context, fn func(Event)) error {
-	q := url.Values{"filters": {`{"type":["container"],"event":["start","die"],"label":["zts.profile"]}`}}
+// Events streams start/die events of labeled containers since the given Unix
+// time until ctx ends or the connection closes. Docker replays events from
+// `since`, so nothing that happened while the caller was busy is missed.
+func (c *Client) Events(ctx context.Context, since int64, fn func(Event)) error {
+	q := url.Values{
+		"since":   {fmt.Sprint(since)},
+		"filters": {`{"type":["container"],"event":["start","die"],"label":["zts.profile"]}`},
+	}
 	resp, err := c.get(ctx, "events", q)
 	if err != nil {
 		return err

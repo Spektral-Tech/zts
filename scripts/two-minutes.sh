@@ -4,6 +4,8 @@
 # (and no TTY) for CI; ZTS_IMAGE to test a local build.
 set -Eeuo pipefail
 IMAGE=${ZTS_IMAGE:-ghcr.io/spektral-tech/zts}
+# On failure, show what the controller saw.
+trap 'rc=$?; if (( rc != 0 )); then echo "--- controller logs" >&2; docker logs zts 2>&1 | tail -20 >&2; fi' EXIT
 TTY=-it; [[ -t 0 ]] || TTY=-i
 start=$(date +%s)
 

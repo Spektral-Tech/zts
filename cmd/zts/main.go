@@ -242,12 +242,16 @@ func reconcileOnce(ctx context.Context, m *manifest.Manifest, dc *docker.Client,
 
 func runUp(ctx context.Context, m *manifest.Manifest, dc *docker.Client, p *provider.Linux) {
 	info("up: reconciling and watching container events (manifest: %s)", m.Path)
+	// Events are requested from just before each reconcile, so a container
+	// that starts while we are busy is replayed by Docker, not missed.
+	since := time.Now().Unix()
 	if err := reconcileOnce(ctx, m, dc, p); err != nil {
 		info("warning: initial reconcile failed: %v; will retry on the next event", err)
 	}
 	for {
-		err := dc.Events(ctx, func(e docker.Event) {
+		err := dc.Events(ctx, since, func(e docker.Event) {
 			info("event: %s %s", e.Action, e.Name)
+			since = time.Now().Unix()
 			if err := reconcileOnce(ctx, m, dc, p); err != nil {
 				info("warning: reconcile failed: %v; will retry on the next event", err)
 			}
