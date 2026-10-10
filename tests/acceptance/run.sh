@@ -20,7 +20,7 @@ t()    { n=$((n+1)); say "# $n: $1"; }
 
 PEER_PID=""; HOST_PID=""; UP_PID=""
 cleanup() {
-  [[ -z $UP_PID ]] || kill "$UP_PID" 2>/dev/null || true
+  [[ -z $UP_PID ]] || kill -- -"$UP_PID" 2>/dev/null || kill "$UP_PID" 2>/dev/null || true
   [[ -z $PEER_PID ]] || kill "$PEER_PID" 2>/dev/null || true
   [[ -z $HOST_PID ]] || kill "$HOST_PID" 2>/dev/null || true
   docker ps -aq --filter name='^ztst-' | xargs -r docker rm -f >/dev/null 2>&1 || true
@@ -227,7 +227,8 @@ profiles:
   app: { allow: [] }
 YAML
 run_c ztst-db db; run_c ztst-app app
-"$ZTS" up "$TMP/m.yaml" >"$TMP/up.log" 2>&1 &
+# own session, so the whole controller (event stream included) can be killed
+setsid "$ZTS" up "$TMP/m.yaml" >"$TMP/up.log" 2>&1 &
 UP_PID=$!
 for _ in $(seq 1 40); do grep -q 'converged (2' "$TMP/up.log" && break; sleep 0.25; done
 start_listener ztst-db 5432; sleep 0.3
@@ -246,7 +247,7 @@ YAML
 "$ZTS" load "$TMP/m.yaml" < "$TMP/new.yaml" >/dev/null 2>&1
 after=0
 for _ in $(seq 1 30); do can_tcp ztst-app "$(ip_of ztst-db)" 5432 && after=1 && break; sleep 0.3; done
-kill "$UP_PID" 2>/dev/null; wait "$UP_PID" 2>/dev/null || true
+kill -- -"$UP_PID" 2>/dev/null || kill "$UP_PID" 2>/dev/null; wait "$UP_PID" 2>/dev/null || true
 if (( before == 0 && after == 1 )); then ok "relation appeared after load, no restart"; else nok "before=$before after=$after: $(tail -3 "$TMP/up.log" | tr '\n' ' ')"; fi
 
 say "1..$n"

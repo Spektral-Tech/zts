@@ -1201,7 +1201,8 @@ reconcile_resolvers() {
     [[ -z $pid ]] || kill "$pid" 2>/dev/null || true
     rm -f "$pidfile"
     mv "$conf.new" "$conf"
-    ip netns exec "$ZNS" dnsmasq --conf-file="$conf" || die "profile '$profile': dnsmasq failed to start"
+    # Lock descriptors must not outlive this reconcile inside the daemon.
+    ip netns exec "$ZNS" dnsmasq --conf-file="$conf" 8>&- 9>&- || die "profile '$profile': dnsmasq failed to start"
   done
 }
 
@@ -1366,7 +1367,7 @@ run_up() {
         since=$(date +%s)
         ( reconcile_once ) || warn "manifest rejected; the previous state stays applied"
       fi
-    done < <(curl -sN --unix-socket "$DOCKER_SOCK" -G 'http://docker/events' \
+    done < <(exec 8>&- 9>&-; curl -sN --unix-socket "$DOCKER_SOCK" -G 'http://docker/events' \
                --data-urlencode "since=$since" \
                --data-urlencode 'filters={"type":["container"],"event":["start","die"],"label":["zts.profile"]}' \
                | jq --unbuffered -r '"\(.Action) \(.Actor.Attributes.name // .Actor.ID[0:12])"' 2>/dev/null)
