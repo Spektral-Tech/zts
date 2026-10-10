@@ -1,6 +1,6 @@
 # ZTS — Technical Specification
 
-**Status:** Draft 0.1.1 (pre-release)  
+**Status:** Draft 0.1.2 (pre-release)  
 **Implementation reference:** Go core (`cmd/zts`) and `zts.sh` v0.2 (bash essentials), in parity  
 **Scope of this document:** target architecture plus an explicit implementation-status boundary.
 

@@ -1,7 +1,7 @@
 {
   "name": "zts-site",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "ZTS site: JSX components rendered to static HTML at build time",
   "type": "module",
   "scripts": {

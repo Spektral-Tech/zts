@@ -137,7 +137,10 @@ require_runtime_deps() {
     need_cmd "$cmd"
   done
   yq --version 2>/dev/null | grep -E 'version v?4\.' >/dev/null || die "requires Mike Farah yq v4"
-  [[ -S $DOCKER_SOCK ]] || die "docker socket not found: $DOCKER_SOCK"
+  [[ -S $DOCKER_SOCK ]] || die "docker socket not found: $DOCKER_SOCK
+  the controller needs the host and the Docker socket; run it as:
+  docker run -d --name zts --restart unless-stopped --privileged --pid=host --network host \\
+      -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts <image> up"
 }
 
 # ---------- IPv4 helpers ----------
@@ -1310,7 +1313,14 @@ destroy_state() {
 
 # ---------- up: reconcile on container events ----------
 
+take_reconcile_lock() {
+  exec 9>"$HOST_ROOT/run/lock/zts-${ZNS}.lock"
+  flock -xw 15 9 || die "could not get the lock for namespace '$ZNS' within 15s (a reconcile is still running)"
+}
+
 reconcile_once() {
+  # Runs in a subshell: the reconcile lock is released when it returns.
+  take_reconcile_lock
   # Fresh manifest and inventory every time; everything above is idempotent.
   HAS_HOST_TRANSPORT=0; HOST_ALLOW_PRIVATE=false
   validate_manifest
@@ -1534,9 +1544,17 @@ main() {
 
   # Serialize reconcilers. This is not a daemon/state service; it only prevents
   # two one-shot applies from editing the same kernel objects concurrently.
-  mkdir -p /run/lock
-  exec 9>"/run/lock/zts-${ZNS}.lock"
-  flock -x 9
+  # Locks live on the host (/run/lock, reached through /proc/1/root in a
+  # container), so controllers and one-shot commands in different containers
+  # still exclude each other. The controller holds its own lock for life; the
+  # reconcile lock is taken only while kernel state is being read or changed.
+  mkdir -p "$HOST_ROOT/run/lock"
+  if [[ $COMMAND == up ]]; then
+    exec 8>"$HOST_ROOT/run/lock/zts-${ZNS}.controller"
+    flock -xn 8 || die "another controller is already running for namespace '$ZNS' (use 'docker exec zts zts status|plan|edit' instead of a second up)"
+  else
+    take_reconcile_lock
+  fi
 
   case "$COMMAND" in
     destroy) destroy_state; exit 0 ;;

@@ -35,7 +35,7 @@ func New() *Client {
 func (c *Client) Available() error {
 	st, err := os.Stat(c.sock)
 	if err != nil || st.Mode()&os.ModeSocket == 0 {
-		return fmt.Errorf("docker socket not found: %s", c.sock)
+		return fmt.Errorf("docker socket not found: %s\n  the controller needs the host and the Docker socket; run it as:\n  docker run -d --name zts --restart unless-stopped --privileged --pid=host --network host \\\n      -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts <image> up", c.sock)
 	}
 	return nil
 }

@@ -30,6 +30,8 @@ Why the controller container runs the way it does:
 
 Docker Desktop with Enhanced Container Isolation turned on blocks `--pid=host`; ZTS stops with a clear message and does not try to work around it.
 
+To upgrade or restart the controller, remove the old container first: `docker rm -f zts`, then the `up` line again. The manifest stays in the volume; the kernel state stays in place and is reconciled by the new controller.
+
 ## Labels
 
 ```text
@@ -74,10 +76,10 @@ docker run --rm --privileged --pid=host --network host \
 The manifest lives in the `zts` volume, so these three commands exist so you never need to know where that is. The running controller notices a changed file within two seconds and applies it; an invalid file is reported in `docker logs zts` and the previous state stays applied.
 
 ```bash
-docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts edit
+docker exec -it zts zts edit
 ```
 
-Opens the manifest in `$EDITOR` (falls back to `vi`). On save it is validated; an invalid result is never written, you get to reopen or discard.
+Opens the manifest in `$EDITOR` (falls back to `vi`) inside the running controller. On save it is validated; an invalid result is never written, you get to reopen or discard. The same works without a running controller: `docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts edit`.
 
 ```bash
 docker run --rm -v zts:/etc/zts ghcr.io/spektral-tech/zts show > zts.yaml

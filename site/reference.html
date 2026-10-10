@@ -13,6 +13,7 @@ docker exec agent wget <span class="tok-flag">-qO-</span> https://api.github.com
 <p>Why the controller container runs the way it does:</p>
 <ul><li><code>--privileged --pid=host</code>: it reaches the kernel of the Docker host. On Docker Desktop that host is Docker's own Linux VM.</li><li><code>--network host</code>: the host transport and the WireGuard sockets live in the host namespace.</li><li>the Docker socket: inventory only. ZTS never starts, stops or connects a container.</li><li><code>-v zts:/etc/zts</code>: the manifest, and WireGuard keys if you use them.</li></ul>
 <p>Docker Desktop with Enhanced Container Isolation turned on blocks <code>--pid=host</code>; ZTS stops with a clear message and does not try to work around it.</p>
+<p>To upgrade or restart the controller, remove the old container first: <code>docker rm -f zts</code>, then the <code>up</code> line again. The manifest stays in the volume; the kernel state stays in place and is reconciled by the new controller.</p>
 <h2 id="labels">Labels</h2>
 <pre><code class="lang-text">zts.profile=&lt;profile&gt;     required: which profile of the manifest applies
 zts.identity=&lt;name&gt;       optional: a stable identity; defaults to the container name</code></pre>
@@ -39,8 +40,8 @@ docker run <span class="tok-flag">--rm</span> <span class="tok-flag">--privilege
     <span class="tok-flag">-v</span> /var/run/docker.sock:/var/run/docker.sock <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts destroy</code></pre>
 <h2 id="changing-the-manifest">Changing the manifest</h2>
 <p>The manifest lives in the <code>zts</code> volume, so these three commands exist so you never need to know where that is. The running controller notices a changed file within two seconds and applies it; an invalid file is reported in <code>docker logs zts</code> and the previous state stays applied.</p>
-<pre><code class="lang-bash">docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-it</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts edit</code></pre>
-<p>Opens the manifest in <code>$EDITOR</code> (falls back to <code>vi</code>). On save it is validated; an invalid result is never written, you get to reopen or discard.</p>
+<pre><code class="lang-bash">docker exec <span class="tok-flag">-it</span> zts zts edit</code></pre>
+<p>Opens the manifest in <code>$EDITOR</code> (falls back to <code>vi</code>) inside the running controller. On save it is validated; an invalid result is never written, you get to reopen or discard. The same works without a running controller: <code>docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts edit</code>.</p>
 <pre><code class="lang-bash">docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts show &gt; zts.yaml
 docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-i</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts load &lt; zts.yaml</code></pre>
 <p>For your own editor: <code>show</code> prints the manifest, <code>load</code> validates stdin and replaces it only if valid.</p>

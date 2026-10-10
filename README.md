@@ -1,6 +1,6 @@
 # ZTS
 
-Status: v0.1.1 pre-release · License: Apache-2.0
+Status: v0.1.2 pre-release · License: Apache-2.0
 
 ZTS gives any unmodified container only the network paths its profile declares. By name, by port, by transport. No proxy, no SDK, no CA, no ambient trust. Everything else is unreachable by construction.
 

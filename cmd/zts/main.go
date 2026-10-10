@@ -119,22 +119,27 @@ func main() {
 	if err != nil {
 		die("%v", err)
 	}
-	lock, err := acquireLock(m.Substrate.Namespace)
+	prov := &provider.Linux{Name: m.Substrate.Namespace, Log: info}
+	ctx := context.Background()
+
+	if cmd == "up" {
+		lock, err := controllerLock(m.Substrate.Namespace)
+		if err != nil {
+			die("%v", err)
+		}
+		defer lock.Close()
+		runUp(ctx, m, dc, prov)
+		return
+	}
+	lock, err := reconcileLock(m.Substrate.Namespace)
 	if err != nil {
 		die("%v", err)
 	}
 	defer lock.Close()
-	prov := &provider.Linux{Name: m.Substrate.Namespace, Log: info}
-	ctx := context.Background()
-
-	switch cmd {
-	case "destroy":
+	if cmd == "destroy" {
 		if err := prov.Destroy(); err != nil {
 			die("%v", err)
 		}
-		return
-	case "up":
-		runUp(ctx, m, dc, prov)
 		return
 	}
 	inv, err := provider.Discover(ctx, m, dc)
@@ -274,6 +279,12 @@ func (c *controller) reconcile(ctx context.Context, why string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.since = time.Now().Unix()
+	lock, err := reconcileLock(c.p.Name)
+	if err != nil {
+		info("warning: reconcile (%s): %v", why, err)
+		return
+	}
+	defer lock.Close()
 	if err := reconcileOnce(ctx, c.m, c.dc, c.p); err != nil {
 		info("warning: reconcile (%s) failed: %v; will retry on the next event", why, err)
 	}
