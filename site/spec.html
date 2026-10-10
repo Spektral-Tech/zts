@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="description" content="ZTS technical specification: trust model, invariants, manifest, reconciliation, Linux provider, implementation status."/><meta name="theme-color" content="#0b0b0b"/><title>ZTS — Technical Specification</title><link rel="stylesheet" href="styles.css?v=9f8c915a75"/><script defer src="app.js?v=42cb113dd6"></script></head><body class="page-spec"><a class="skip" href="#main">Skip to content</a><header class="topbar"><a class="brand" href="index.html" aria-label="ZTS home"><img class="brand-mark" src="brand-mark.png" alt width="288" height="165"/><span>ZTS</span></a><nav aria-label="Primary"><a href="index.html#why">Why</a><a href="index.html#start">Start</a><a href="index.html#model">Model</a><a href="index.html#manifesto">Manifesto</a><a href="reference.html">Docs</a><a href="spec.html" aria-current="page">Spec</a></nav><a class="quiet-link" href="https://github.com/Spektral-Tech/zts" rel="noopener">Source →</a></header><main id="main" class="doc"><p class="doc-source"><a href="SPEC.md" download>SPEC.md ↓</a></p><article><h1 id="zts-technical-specification">ZTS — Technical Specification</h1>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="description" content="ZTS technical specification: trust model, invariants, manifest, reconciliation, Linux provider, implementation status."/><meta name="theme-color" content="#0b0b0b"/><title>ZTS — Technical Specification</title><link rel="stylesheet" href="styles.css?v=130fe4ab6b"/><script defer src="app.js?v=42cb113dd6"></script></head><body class="page-spec"><a class="skip" href="#main">Skip to content</a><header class="topbar"><a class="brand" href="index.html" aria-label="ZTS home"><img class="brand-mark" src="brand-mark.png" alt width="288" height="165"/><span>ZTS</span></a><nav aria-label="Primary"><a href="index.html#why">Why</a><a href="index.html#start">Start</a><a href="index.html#model">Model</a><a href="index.html#manifesto">Manifesto</a><a href="reference.html">Docs</a><a href="spec.html" aria-current="page">Spec</a></nav><a class="quiet-link" href="https://github.com/Spektral-Tech/zts" rel="noopener">Source →</a></header><main id="main" class="doc"><p class="doc-source"><a href="SPEC.md" download>SPEC.md ↓</a></p><article><h1 id="zts-technical-specification">ZTS — Technical Specification</h1>
 <p><strong>Status:</strong> Draft 0.1.0 (pre-release) <strong>Implementation reference:</strong> Go core (<code>cmd/zts</code>) and <code>zts.sh</code> v0.2 (bash essentials), in parity <strong>Scope of this document:</strong> target architecture plus an explicit implementation-status boundary.</p>
 <p>RFC 2119-style terms <strong>MUST</strong>, <strong>SHOULD</strong>, and <strong>MAY</strong> indicate normative requirements.</p>
 <hr>
@@ -79,38 +79,38 @@ zts.identity=&lt;stable logical identity&gt;  optional; defaults to the containe
 <h2 id="6-desired-state-model">6. Desired-state model</h2>
 <p>The manifest describes logical desired state.</p>
 <h3 id="6-1-substrate">6.1 Substrate</h3>
-<pre><code class="lang-yaml">substrate:
-  namespace: zts
-  pool: 100.64.0.0/10</code></pre>
+<pre><code class="lang-yaml"><span class="tok-key">substrate</span><span class="tok-op">:</span>
+  <span class="tok-key">namespace</span><span class="tok-op">:</span> zts
+  <span class="tok-key">pool</span><span class="tok-op">:</span> <span class="tok-num">100.64.0.0/10</span></code></pre>
 <p><code>namespace</code> names the local Linux namespace used by the reference provider.</p>
 <p><code>pool</code> is address space available to the provider. Address allocation is an implementation detail and MUST NOT be treated as workload identity.</p>
 <p><code>resolvers</code> (optional, default <code>[1.1.1.1, 9.9.9.9]</code>) are the upstream resolvers used for name-based resources.</p>
 <h3 id="6-2-profiles">6.2 Profiles</h3>
 <p>A profile defines desired reachability for a class of workload.</p>
-<pre><code class="lang-yaml">profiles:
-  development:
-    allow:
-      - to: accounting-db
-        protocol: tcp
-        ports: [5432]
+<pre><code class="lang-yaml"><span class="tok-key">profiles</span><span class="tok-op">:</span>
+  <span class="tok-key">development</span><span class="tok-op">:</span>
+    <span class="tok-key">allow</span><span class="tok-op">:</span>
+      <span class="tok-op">- </span><span class="tok-key">to</span><span class="tok-op">:</span> accounting-db
+        <span class="tok-key">protocol</span><span class="tok-op">:</span> tcp
+        <span class="tok-key">ports</span><span class="tok-op">:</span> <span class="tok-op">[</span><span class="tok-num">5432</span><span class="tok-op">]</span>
 
-      - to: internet
-        via: sandbox-egress
-        protocol: tcp
-        ports: [80, 443]</code></pre>
+      <span class="tok-op">- </span><span class="tok-key">to</span><span class="tok-op">:</span> internet
+        <span class="tok-key">via</span><span class="tok-op">:</span> sandbox-egress
+        <span class="tok-key">protocol</span><span class="tok-op">:</span> tcp
+        <span class="tok-key">ports</span><span class="tok-op">:</span> <span class="tok-op">[</span><span class="tok-num">80</span><span class="tok-op">,</span> <span class="tok-num">443</span><span class="tok-op">]</span></code></pre>
 <p>The profile expresses relationships, not Linux commands.</p>
 <h3 id="6-3-resources">6.3 Resources</h3>
 <p>A resource is a logical destination resolvable by the provider.</p>
 <p>Resource forms in v0.2:</p>
-<pre><code class="lang-yaml">resources:
-  accounting-db:
-    workload: accounting-db          # a managed workload on this host
+<pre><code class="lang-yaml"><span class="tok-key">resources</span><span class="tok-op">:</span>
+  <span class="tok-key">accounting-db</span><span class="tok-op">:</span>
+    <span class="tok-key">workload</span><span class="tok-op">:</span> accounting-db         <span class="tok-cmt"> # a managed workload on this host</span>
 
-  internet:
-    cidrs: [0.0.0.0/0]               # IPv4 address space
+  <span class="tok-key">internet</span><span class="tok-op">:</span>
+    <span class="tok-key">cidrs</span><span class="tok-op">:</span> <span class="tok-op">[</span><span class="tok-num">0.0.0.0/0</span><span class="tok-op">]</span>              <span class="tok-cmt"> # IPv4 address space</span>
 
-  github:
-    names: [github.com, "*.github.com"]   # DNS names; a name covers its subdomains; "*" is any name</code></pre>
+  <span class="tok-key">github</span><span class="tok-op">:</span>
+    <span class="tok-key">names</span><span class="tok-op">:</span> <span class="tok-op">[</span>github.com<span class="tok-op">,</span> <span class="tok-str">"*.github.com"</span><span class="tok-op">]</span>  <span class="tok-cmt"> # DNS names; a name covers its subdomains; "*" is any name</span></code></pre>
 <p><strong>Names without a proxy.</strong> A workload's only resolver is its ZTS gateway. Per profile, that resolver answers only the names its profile declares; any other name is NXDOMAIN (absence, not rejection). Each answer feeds the resolved addresses into a kernel set that the forwarding policy references. The application sees ordinary DNS and ordinary TLS to the real peer. No proxy, no CA, no environment variable, no SNI inspection.</p>
 <p>Consequences:</p>
 <ul><li>A raw address that was never resolved for a declared name has no path.</li><li>All name-based relations of a profile MUST use the same transport.</li><li>Addresses inside private, link-local or multicast space resolved for a name are dropped by the host transport guard (see §8.5), which closes DNS rebinding.</li></ul>
@@ -118,20 +118,20 @@ zts.identity=&lt;stable logical identity&gt;  optional; defaults to the containe
 <h3 id="6-4-transports">6.4 Transports</h3>
 <p>A transport is a permitted carrier/next-hop implementation.</p>
 <p>Transport types in v0.2:</p>
-<pre><code class="lang-yaml">transports:
-  host:
-    type: host              # leave through this host's default route (NAT)
-    allow_private: false    # optional; lifts the private-space guard
+<pre><code class="lang-yaml"><span class="tok-key">transports</span><span class="tok-op">:</span>
+  <span class="tok-key">host</span><span class="tok-op">:</span>
+    <span class="tok-key">type</span><span class="tok-op">:</span> host             <span class="tok-cmt"> # leave through this host's default route (NAT)</span>
+    <span class="tok-key">allow_private</span><span class="tok-op">:</span> <span class="tok-num">false</span>   <span class="tok-cmt"> # optional; lifts the private-space guard</span>
 
-  sandbox-egress:
-    type: wireguard
-    address: 10.255.255.2/32
-    private_key_file: /etc/zts/sandbox-egress.key
-    peer:
-      public_key: ...
-      endpoint: 192.0.2.10:51820
-      allowed_ips:
-        - 0.0.0.0/0</code></pre>
+  <span class="tok-key">sandbox-egress</span><span class="tok-op">:</span>
+    <span class="tok-key">type</span><span class="tok-op">:</span> wireguard
+    <span class="tok-key">address</span><span class="tok-op">:</span> <span class="tok-num">10.255.255.2/32</span>
+    <span class="tok-key">private_key_file</span><span class="tok-op">:</span> /etc/zts/sandbox-egress.key
+    <span class="tok-key">peer</span><span class="tok-op">:</span>
+      <span class="tok-key">public_key</span><span class="tok-op">:</span> ...
+      <span class="tok-key">endpoint</span><span class="tok-op">:</span> <span class="tok-num">192.0.2.10</span>:51820
+      <span class="tok-key">allowed_ips</span><span class="tok-op">:</span>
+        <span class="tok-op">- </span><span class="tok-num">0.0.0.0/0</span></code></pre>
 <p>A transport is not a workload permission by itself. Profiles/grants determine which workloads may use it.</p>
 <p><code>type: host</code> is the default of a first install: it requires nothing beyond the kernel. WireGuard is optional and only needed when a <code>wireguard</code> transport is declared.</p>
 <hr>

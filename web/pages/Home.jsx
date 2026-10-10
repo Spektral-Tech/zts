@@ -1,6 +1,7 @@
 import { Layout } from '../components/Layout.jsx';
 import { Section, CodePanel } from '../components/Section.jsx';
 import { Why } from '../components/Why.jsx';
+import { hlShell, hlYaml } from '../highlight.js';
 
 const IMAGE = 'ghcr.io/spektral-tech/zts';
 
@@ -32,21 +33,21 @@ const CAST = [
   { out: 'none', tone: 'dim' },
 ];
 
-const MANIFEST_YAML = `<span class="key">transports:</span>
-  <span class="key">host:</span> { <span class="key">type:</span> host }
+const MANIFEST_YAML = `transports:
+  host: { type: host }
 
-<span class="key">resources:</span>
-  <span class="key">accounting-db:</span> { <span class="key">workload:</span> accounting-db }
-  <span class="key">github:</span> { <span class="key">names:</span> [github.com, "*.github.com"] }
+resources:
+  accounting-db: { workload: accounting-db }
+  github: { names: [github.com, "*.github.com"] }
 
-<span class="key">profiles:</span>
-  <span class="key">isolated:</span>
-    <span class="key">allow:</span> []
+profiles:
+  isolated:
+    allow: []
 
-  <span class="key">dev:</span>
-    <span class="key">allow:</span>
-      - { <span class="key">to:</span> accounting-db, <span class="key">protocol:</span> tcp, <span class="key">ports:</span> [5432] }
-      - { <span class="key">to:</span> github, <span class="key">via:</span> host, <span class="key">protocol:</span> tcp, <span class="key">ports:</span> [443] }`;
+  dev:
+    allow:
+      - { to: accounting-db, protocol: tcp, ports: [5432] }
+      - { to: github, via: host, protocol: tcp, ports: [443] }`;
 
 const PIPELINE = [
   ['Discover', <>Read labeled <code>--network none</code> containers and their netns. No Docker network writes.</>],
@@ -125,7 +126,7 @@ export function Home({ version, assets }) {
                  title="Four commands. One question. Nothing installed on the host."
                  lede="Linux or Mac. The controller runs as a container, reaches the kernel through Docker's own VM or your host, and leaves only inspectable native state behind.">
           <CodePanel title="terminal" note="copy, paste, done" label="Quickstart" id="quickstart"
-                     html={'<code>' + QUICKSTART.map((c) => `<span class="cast-prompt">$</span> ${c}`).join('\n') + '</code>'}>
+                     html={'<code>' + hlShell(QUICKSTART.map((c) => `$ ${c}`).join('\n')) + '</code>'}>
             <p>The first command asks what your containers will do and writes an editable <code>zts.yaml</code>. The second starts the controller. The third is any image you like, with <code>--network none</code> and one label; the network it is allowed to perceive appears as it starts. The fourth proves it: GitHub answers, and <code>example.com</code> does not even resolve. Swap <code>dev</code> for <code>isolated</code> and nothing answers. Everything else is in the <a href="reference.html">docs</a>.</p>
           </CodePanel>
         </Section>
@@ -146,7 +147,7 @@ export function Home({ version, assets }) {
               <pre class="cast-screen"><code>{CAST.map((l, i) => (
                 <>
                   {l.gap ? <span class="cast-line cast-gap"> </span>
-                    : l.cmd ? <span class="cast-line"><span class="cast-prompt">$</span> <span class="cast-command">{l.cmd}</span></span>
+                    : l.cmd ? <span class="cast-line"><span class="prompt"></span><span class="cast-command" dangerouslySetInnerHTML={{ __html: hlShell(l.cmd) }} /></span>
                     : <span class={`cast-line cast-${l.tone}`}>{l.out}</span>}
                   {i < CAST.length - 1 ? '\n' : ''}
                 </>
@@ -236,7 +237,7 @@ export function Home({ version, assets }) {
             <p>The manifest says which relationships should exist. The Linux provider chooses veth names, routes, tables, nftables state and WireGuard materialization.</p>
             <p class="aside">Declare relationships. Let infrastructure enforce them.</p>
           </div>
-          <CodePanel title="zts.yaml" note="policy intent" label="Example ZTS manifest" html={'<code>' + MANIFEST_YAML + '</code>'}>
+          <CodePanel title="zts.yaml" note="policy intent" label="Example ZTS manifest" html={'<code>' + hlYaml(MANIFEST_YAML) + '</code>'}>
             <p>There is no <code>ip link add</code>, interface name, routing table number or firewall command in the policy declaration. A name is resolved by the workload's own gateway and the answer becomes the authorization: no proxy, no CA, TLS end to end.</p>
           </CodePanel>
         </section>
@@ -307,7 +308,7 @@ export function Home({ version, assets }) {
             <h2>You can read all of <code>zts.sh</code>. You do not need to trust it.</h2>
             <p>v{version} ships two implementations that pass the same acceptance suite: a Go core, one static binary, which is the image above; and the bash essentials, one readable file that does the most with the least. They agree on every derived name and address. Neither is an authority: the mechanism is inspectable native state. Run either directly on a Linux host:</p>
             <div class="commands" aria-label="ZTS CLI example">
-              <pre><code>{'$ ./zts.sh check zts.yaml\n$ sudo ./zts.sh plan zts.yaml\n$ sudo ./zts.sh apply zts.yaml\n$ sudo ./zts.sh status zts.yaml'}</code></pre>
+              <pre><code dangerouslySetInnerHTML={{ __html: hlShell('$ ./zts.sh check zts.yaml\n$ sudo ./zts.sh plan zts.yaml\n$ sudo ./zts.sh apply zts.yaml\n$ sudo ./zts.sh status zts.yaml') }} /></pre>
             </div>
           </div>
           <div class="status-grid">

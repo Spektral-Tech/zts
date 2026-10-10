@@ -6,7 +6,7 @@ How to run ZTS, what the manifest can say, and what to expect. The model is in t
 
 Only Docker is needed, on Linux or on a Mac with Docker Desktop.
 
-```text
+```bash
 docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts init
 docker run -d --name zts --restart unless-stopped --privileged --pid=host --network host \
     -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts ghcr.io/spektral-tech/zts up
@@ -16,7 +16,7 @@ docker run -d --name zts --restart unless-stopped --privileged --pid=host --netw
 
 From then on, a managed container is any container started with `--network none` and one label:
 
-```text
+```bash
 docker run -d --name agent --network none --label zts.profile=dev alpine sleep infinity
 docker exec agent wget -qO- https://api.github.com/zen
 ```
@@ -43,7 +43,7 @@ Identity decides the workload's address, which is derived from it and stable acr
 
 The same commands exist in the image and in the standalone binaries.
 
-```text
+```bash
 zts init     [manifest]   write a manifest from a preset; asks once on a TTY, or use ZTS_PRESET
 zts check    [manifest]   validate a manifest; no root, no Docker
 zts plan     [manifest]   show what apply would change; "No changes." when converged
@@ -58,7 +58,7 @@ The manifest defaults to `/etc/zts/zts.yaml` when that directory exists, else `.
 
 Through the image:
 
-```text
+```bash
 docker exec zts zts status
 docker exec zts zts plan
 docker restart zts                  # re-read the manifest now
@@ -191,7 +191,7 @@ The private-space guard lets this through because the CIDR lies entirely inside 
 
 ### Go core
 
-```text
+```bash
 go build -o bin/zts ./cmd/zts
 ./bin/zts check zts.yaml
 sudo ./bin/zts apply zts.yaml
@@ -205,7 +205,7 @@ Needs `nft` on the host, and `iptables` when Docker manages the host firewall (Z
 
 Dependencies: bash 4+, curl, jq, Mike Farah `yq` v4, iproute2, nftables, `nsenter`, `flock`; `dnsmasq` built with nftset support for name-based resources; `wireguard-tools` for WireGuard transports.
 
-```text
+```bash
 ./zts.sh selftest
 ./zts.sh check zts.yaml
 sudo ./zts.sh apply zts.yaml
@@ -217,7 +217,7 @@ Read it top to bottom; every kernel object it creates is named there. `Dockerfil
 
 ## Verifying a checkout
 
-```text
+```bash
 scripts/run-checks.sh            # lint, selftests, fixtures, go test, site; acceptance when root+nft+docker
 sudo tests/acceptance/run.sh     # the spec's acceptance tests plus names, on Linux
 scripts/two-minutes.sh           # the quickstart, timed, with a host-namespace cleanliness check

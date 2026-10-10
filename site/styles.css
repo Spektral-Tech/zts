@@ -164,6 +164,16 @@ h1 em { color: var(--muted); font-style: normal; font-weight: 430; }
 .cast.playing .cast-line { opacity: 0; transform: translateY(4px); }
 .cast.playing .cast-line.shown { opacity: 1; transform: none; transition: opacity .12s linear, transform .12s ease; }
 .cast-prompt { color: var(--ink); }
+/* The prompt is drawn, not typed: it never ends up in a copied command. */
+.prompt::before { content: "$ "; color: var(--muted); user-select: none; }
+.tok-cmd { color: var(--ink); font-weight: 600; }
+.tok-flag { color: #9fb7c9; }
+.tok-str { color: #e3c37a; }
+.tok-cmt { color: var(--off); font-style: italic; }
+.tok-op { color: var(--muted); }
+.tok-cont { color: var(--muted); }
+.tok-key { color: var(--route); }
+.tok-num { color: #b7d572; }
 .cast-command { color: #efece2; }
 .cast-dim { color: #77756e; }
 .cast-add { color: var(--ok); }

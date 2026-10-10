@@ -1,6 +1,8 @@
 // The subset of Markdown the published documents use: ATX headings,
 // paragraphs, bullet and numbered lists, fenced code, blockquotes, rules,
 // inline code/strong/em/strike. Deliberately small; the sources are ours.
+import { highlight } from './highlight.js';
+
 const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export function inline(text) {
@@ -32,7 +34,7 @@ export function markdown(src) {
       i++;
       while (i < lines.length && !lines[i].startsWith('```')) buf.push(lines[i++]);
       i++;
-      out.push(`<pre><code${lang ? ` class="lang-${lang}"` : ''}>${esc(buf.join('\n'))}</code></pre>`);
+      out.push(`<pre><code${lang ? ` class="lang-${lang}"` : ''}>${highlight(lang, buf.join('\n'))}</code></pre>`);
       continue;
     }
     let m = /^(#{1,6})\s+(.*)$/.exec(line);
