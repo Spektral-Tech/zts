@@ -5,10 +5,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/spektral-tech/zts/internal/alloc"
@@ -27,10 +30,13 @@ func usage() {
 	fmt.Fprint(os.Stderr, `Usage:
   zts init     [manifest.yaml]   write a manifest from a preset
   zts check    [manifest.yaml]   validate a manifest (no root needed)
+  zts edit     [manifest.yaml]   edit in $EDITOR; only a valid result is saved
+  zts show     [manifest.yaml]   print the manifest
+  zts load     [manifest.yaml]   replace the manifest from stdin, after validation
   zts plan     [manifest.yaml]
   zts apply    [manifest.yaml]
   zts status   [manifest.yaml]
-  zts up       [manifest.yaml]   apply and keep reconciling on container events
+  zts up       [manifest.yaml]   apply, then reconcile on container events and manifest changes
   zts destroy  [manifest.yaml]
   zts selftest
 `)
@@ -77,6 +83,19 @@ func main() {
 		return
 	case "init":
 		runInit(path, true)
+		return
+	case "show":
+		b, err := os.ReadFile(path)
+		if err != nil {
+			die("manifest not found: %s", path)
+		}
+		os.Stdout.Write(b)
+		return
+	case "load":
+		runLoad(path)
+		return
+	case "edit":
+		runEdit(path)
 		return
 	case "plan", "apply", "status", "up", "destroy":
 	default:
@@ -240,25 +259,151 @@ func reconcileOnce(ctx context.Context, m *manifest.Manifest, dc *docker.Client,
 	return p.Apply(inv)
 }
 
+// controller serializes reconciles coming from container events and from
+// manifest changes, and always uses the last manifest that validated.
+type controller struct {
+	mu    sync.Mutex
+	m     *manifest.Manifest
+	mtime time.Time
+	dc    *docker.Client
+	p     *provider.Linux
+	since int64
+}
+
+func (c *controller) reconcile(ctx context.Context, why string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.since = time.Now().Unix()
+	if err := reconcileOnce(ctx, c.m, c.dc, c.p); err != nil {
+		info("warning: reconcile (%s) failed: %v; will retry on the next event", why, err)
+	}
+}
+
+// reloadIfChanged re-reads the manifest when its mtime moved. An invalid
+// manifest is reported and ignored: the previous state stays applied.
+func (c *controller) reloadIfChanged(ctx context.Context) {
+	st, err := os.Stat(c.m.Path)
+	if err != nil || st.ModTime().Equal(c.mtime) {
+		return
+	}
+	c.mtime = st.ModTime()
+	m, err := manifest.Check(c.m.Path)
+	if err != nil {
+		info("warning: manifest changed but is invalid, previous state stays applied: %v", err)
+		return
+	}
+	if m.Substrate.Namespace != c.p.Name {
+		info("warning: substrate.namespace changed (%s -> %s); run destroy and start again", c.p.Name, m.Substrate.Namespace)
+		return
+	}
+	info("manifest changed: %s", c.m.Path)
+	c.mu.Lock()
+	c.m = m
+	c.mu.Unlock()
+	c.reconcile(ctx, "manifest")
+}
+
 func runUp(ctx context.Context, m *manifest.Manifest, dc *docker.Client, p *provider.Linux) {
-	info("up: reconciling and watching container events (manifest: %s)", m.Path)
+	info("up: reconciling and watching container events and the manifest (%s)", m.Path)
+	c := &controller{m: m, dc: dc, p: p}
+	if st, err := os.Stat(m.Path); err == nil {
+		c.mtime = st.ModTime()
+	}
 	// Events are requested from just before each reconcile, so a container
 	// that starts while we are busy is replayed by Docker, not missed.
-	since := time.Now().Unix()
-	if err := reconcileOnce(ctx, m, dc, p); err != nil {
-		info("warning: initial reconcile failed: %v; will retry on the next event", err)
-	}
+	c.since = time.Now().Unix()
+	c.reconcile(ctx, "start")
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for range t.C {
+			c.reloadIfChanged(ctx)
+		}
+	}()
 	for {
-		err := dc.Events(ctx, since, func(e docker.Event) {
+		err := dc.Events(ctx, c.since, func(e docker.Event) {
 			info("event: %s %s", e.Action, e.Name)
-			since = time.Now().Unix()
-			if err := reconcileOnce(ctx, m, dc, p); err != nil {
-				info("warning: reconcile failed: %v; will retry on the next event", err)
-			}
+			c.reconcile(ctx, "event")
 		})
 		info("warning: event stream closed (%v); reconnecting in 2s", err)
 		time.Sleep(2 * time.Second)
 	}
+}
+
+// runLoad replaces the manifest with stdin, after validation.
+func runLoad(path string) {
+	b, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		die("%v", err)
+	}
+	tmp := path + ".new"
+	_ = os.MkdirAll(filepath.Dir(path), 0o755)
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		die("%v", err)
+	}
+	if _, err := manifest.Check(tmp); err != nil {
+		os.Remove(tmp)
+		die("not saved: %v", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		die("%v", err)
+	}
+	info("saved %s", path)
+}
+
+// runEdit opens the manifest in $EDITOR; only a valid result is saved.
+func runEdit(path string) {
+	if st, _ := os.Stdin.Stat(); st == nil || st.Mode()&os.ModeCharDevice == 0 {
+		die("edit needs a terminal (docker run -it); use 'show' and 'load' otherwise")
+	}
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		editor = "vi"
+	}
+	tmp := filepath.Join(os.TempDir(), "zts-edit.yaml")
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		cur = []byte(must(manifest.Preset("coding-agent")))
+	}
+	if err := os.WriteFile(tmp, cur, 0o644); err != nil {
+		die("%v", err)
+	}
+	defer os.Remove(tmp)
+	for {
+		cmd := exec.Command("sh", "-c", editor+" \"$1\"", "sh", tmp)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		_ = cmd.Run()
+		_, err := manifest.Check(tmp)
+		if err == nil {
+			b, _ := os.ReadFile(tmp)
+			if string(b) == string(cur) {
+				info("no changes")
+				return
+			}
+			_ = os.MkdirAll(filepath.Dir(path), 0o755)
+			if err := os.WriteFile(path, b, 0o644); err != nil {
+				die("%v", err)
+			}
+			info("saved %s", path)
+			return
+		}
+		fmt.Fprintf(os.Stderr, "\n%v\n\nThe manifest is invalid and was not saved. [r]eopen or [d]iscard? [r] ", err)
+		line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+		if t := strings.TrimSpace(line); t == "d" || t == "D" {
+			info("discarded")
+			os.Exit(1)
+		}
+	}
+}
+
+func must(s string, err error) string {
+	if err != nil {
+		die("%v", err)
+	}
+	return s
 }
 
 func runInit(path string, verbose bool) {

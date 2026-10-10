@@ -1,6 +1,6 @@
 # ZTS — Technical Specification
 
-**Status:** Draft 0.1.0 (pre-release)  
+**Status:** Draft 0.1.1 (pre-release)  
 **Implementation reference:** Go core (`cmd/zts`) and `zts.sh` v0.2 (bash essentials), in parity  
 **Scope of this document:** target architecture plus an explicit implementation-status boundary.
 
@@ -292,7 +292,7 @@ After destruction, a correctly-created Docker workload returns to `--network non
 
 ### 7.6 Up (controller)
 
-`up` applies, then reconciles again on every container `start` and `die` event. The controller is never in the packet path: stopping it leaves kernel state, routes and already-resolved names in place. In the Go core the per-profile resolvers are detached processes and outlive the controller; in the bash essentials they are children of the controller.
+`up` applies, then reconciles again on every container `start` and `die` event, and when the manifest file changes (polled every two seconds; an invalid manifest is reported and the previous state stays applied). The controller is never in the packet path: stopping it leaves kernel state, routes and already-resolved names in place. In the Go core the per-profile resolvers are detached processes and outlive the controller; in the bash essentials they are children of the controller.
 
 ---
 
@@ -478,10 +478,13 @@ Reference commands:
 ```text
 zts.sh init     [manifest]   write a manifest from a preset
 zts.sh check    [manifest]   validate a manifest without root
+zts.sh edit     [manifest]   edit in $EDITOR; only a valid result is saved
+zts.sh show     [manifest]   print the manifest
+zts.sh load     [manifest]   replace the manifest from stdin, after validation
 zts.sh plan     [manifest]
 zts.sh apply    [manifest]
 zts.sh status   [manifest]
-zts.sh up       [manifest]   apply, then reconcile on container events
+zts.sh up       [manifest]   apply, then reconcile on container events and manifest changes
 zts.sh destroy  [manifest]
 zts.sh selftest
 ```

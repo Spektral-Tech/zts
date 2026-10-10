@@ -1,6 +1,6 @@
 # ZTS
 
-Status: v0.1.0 pre-release · License: Apache-2.0
+Status: v0.1.1 pre-release · License: Apache-2.0
 
 ZTS gives any unmodified container only the network paths its profile declares. By name, by port, by transport. No proxy, no SDK, no CA, no ambient trust. Everything else is unreachable by construction.
 
@@ -62,7 +62,7 @@ docker run -d --name agent --network none --label zts.profile=dev alpine sleep i
 docker exec agent wget -qO- https://api.github.com/zen
 ```
 
-The manifest lives in the `zts` volume (`/etc/zts/zts.yaml`). Edit it and the controller picks it up on the next container event, or `docker restart zts`.
+The manifest lives in the `zts` volume. Change it with `zts edit` (opens `$EDITOR`, saves only a valid result) or `zts show` / `zts load` for your own editor; the running controller applies a changed manifest within two seconds and keeps the previous state if the new one is invalid.
 
 A container's process starts together with its network namespace, and the controller attaches on the `start` event a moment later. Long-running workloads never notice; a one-shot `docker run ... wget` can race that moment, so prove things with `docker exec` or let the command retry.
 

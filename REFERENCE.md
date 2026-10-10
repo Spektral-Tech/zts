@@ -46,10 +46,13 @@ The same commands exist in the image and in the standalone binaries.
 ```bash
 zts init     [manifest]   write a manifest from a preset; asks once on a TTY, or use ZTS_PRESET
 zts check    [manifest]   validate a manifest; no root, no Docker
+zts edit     [manifest]   open it in $EDITOR; only a valid result is saved
+zts show     [manifest]   print it
+zts load     [manifest]   replace it from stdin, after validation
 zts plan     [manifest]   show what apply would change; "No changes." when converged
 zts apply    [manifest]   converge kernel state once and exit
 zts status   [manifest]   workloads, transports, converged or drift
-zts up       [manifest]   apply, then reconcile on container start/die events
+zts up       [manifest]   apply, then reconcile on container start/die and on manifest changes
 zts destroy  [manifest]   remove all ZTS state; workloads fall back to no network
 zts selftest              pure checks: allocation, names, presets
 ```
@@ -61,11 +64,27 @@ Through the image:
 ```bash
 docker exec zts zts status
 docker exec zts zts plan
-docker restart zts                  # re-read the manifest now
 docker logs zts                     # every event and reconciliation
 docker run --rm --privileged --pid=host --network host \
     -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts ghcr.io/spektral-tech/zts destroy
 ```
+
+## Changing the manifest
+
+The manifest lives in the `zts` volume, so these three commands exist so you never need to know where that is. The running controller notices a changed file within two seconds and applies it; an invalid file is reported in `docker logs zts` and the previous state stays applied.
+
+```bash
+docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts edit
+```
+
+Opens the manifest in `$EDITOR` (falls back to `vi`). On save it is validated; an invalid result is never written, you get to reopen or discard.
+
+```bash
+docker run --rm -v zts:/etc/zts ghcr.io/spektral-tech/zts show > zts.yaml
+docker run --rm -i -v zts:/etc/zts ghcr.io/spektral-tech/zts load < zts.yaml
+```
+
+For your own editor: `show` prints the manifest, `load` validates stdin and replaces it only if valid.
 
 ## zts.yaml
 

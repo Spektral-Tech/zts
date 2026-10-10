@@ -21,20 +21,29 @@ zts.identity=&lt;name&gt;       optional: a stable identity; defaults to the con
 <p>The same commands exist in the image and in the standalone binaries.</p>
 <pre><code class="lang-bash">zts init     [manifest]   write a manifest from a preset<span class="tok-op">;</span> <span class="tok-cmd">asks</span> once on a TTY, or use ZTS_PRESET
 zts check    [manifest]   validate a manifest<span class="tok-op">;</span> <span class="tok-cmd">no</span> root, no Docker
+zts edit     [manifest]   open it in $EDITOR<span class="tok-op">;</span> <span class="tok-cmd">only</span> a valid result is saved
+zts show     [manifest]   print it
+zts load     [manifest]   replace it from stdin, after validation
 zts plan     [manifest]   show what apply would change<span class="tok-op">;</span> <span class="tok-str">"No changes."</span> when converged
 zts apply    [manifest]   converge kernel state once and exit
 zts status   [manifest]   workloads, transports, converged or drift
-zts up       [manifest]   apply, then reconcile on container start/die events
+zts up       [manifest]   apply, then reconcile on container start/die and on manifest changes
 zts destroy  [manifest]   remove all ZTS state<span class="tok-op">;</span> <span class="tok-cmd">workloads</span> fall back to no network
 zts selftest              pure checks: allocation, names, presets</code></pre>
 <p>The manifest defaults to <code>/etc/zts/zts.yaml</code> when that directory exists, else <code>./zts.yaml</code>.</p>
 <p>Through the image:</p>
 <pre><code class="lang-bash">docker exec zts zts status
 docker exec zts zts plan
-docker restart zts                  <span class="tok-cmt"># re-read the manifest now</span>
 docker logs zts                     <span class="tok-cmt"># every event and reconciliation</span>
 docker run <span class="tok-flag">--rm</span> <span class="tok-flag">--privileged</span> <span class="tok-flag">--pid</span>=host <span class="tok-flag">--network</span> host <span class="tok-cont">\</span>
     <span class="tok-flag">-v</span> /var/run/docker.sock:/var/run/docker.sock <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts destroy</code></pre>
+<h2 id="changing-the-manifest">Changing the manifest</h2>
+<p>The manifest lives in the <code>zts</code> volume, so these three commands exist so you never need to know where that is. The running controller notices a changed file within two seconds and applies it; an invalid file is reported in <code>docker logs zts</code> and the previous state stays applied.</p>
+<pre><code class="lang-bash">docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-it</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts edit</code></pre>
+<p>Opens the manifest in <code>$EDITOR</code> (falls back to <code>vi</code>). On save it is validated; an invalid result is never written, you get to reopen or discard.</p>
+<pre><code class="lang-bash">docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts show &gt; zts.yaml
+docker run <span class="tok-flag">--rm</span> <span class="tok-flag">-i</span> <span class="tok-flag">-v</span> zts:/etc/zts ghcr.io/spektral-tech/zts load &lt; zts.yaml</code></pre>
+<p>For your own editor: <code>show</code> prints the manifest, <code>load</code> validates stdin and replaces it only if valid.</p>
 <h2 id="zts-yaml">zts.yaml</h2>
 <pre><code class="lang-yaml"><span class="tok-key">version</span><span class="tok-op">:</span> <span class="tok-num">1</span>
 

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="description" content="ZTS technical specification: trust model, invariants, manifest, reconciliation, Linux provider, implementation status."/><meta name="theme-color" content="#0b0b0b"/><title>ZTS — Technical Specification</title><link rel="stylesheet" href="styles.css?v=130fe4ab6b"/><script defer src="app.js?v=42cb113dd6"></script></head><body class="page-spec"><a class="skip" href="#main">Skip to content</a><header class="topbar"><a class="brand" href="index.html" aria-label="ZTS home"><img class="brand-mark" src="brand-mark.png" alt width="288" height="165"/><span>ZTS</span></a><nav aria-label="Primary"><a href="index.html#why">Why</a><a href="index.html#start">Start</a><a href="index.html#model">Model</a><a href="index.html#manifesto">Manifesto</a><a href="reference.html">Docs</a><a href="spec.html" aria-current="page">Spec</a></nav><a class="quiet-link" href="https://github.com/Spektral-Tech/zts" rel="noopener">Source →</a></header><main id="main" class="doc"><p class="doc-source"><a href="SPEC.md" download>SPEC.md ↓</a></p><article><h1 id="zts-technical-specification">ZTS — Technical Specification</h1>
-<p><strong>Status:</strong> Draft 0.1.0 (pre-release) <strong>Implementation reference:</strong> Go core (<code>cmd/zts</code>) and <code>zts.sh</code> v0.2 (bash essentials), in parity <strong>Scope of this document:</strong> target architecture plus an explicit implementation-status boundary.</p>
+<p><strong>Status:</strong> Draft 0.1.1 (pre-release) <strong>Implementation reference:</strong> Go core (<code>cmd/zts</code>) and <code>zts.sh</code> v0.2 (bash essentials), in parity <strong>Scope of this document:</strong> target architecture plus an explicit implementation-status boundary.</p>
 <p>RFC 2119-style terms <strong>MUST</strong>, <strong>SHOULD</strong>, and <strong>MAY</strong> indicate normative requirements.</p>
 <hr>
 <h2 id="1-purpose">1. Purpose</h2>
@@ -155,7 +155,7 @@ verify(actual == desired)</code></pre>
 <p><code>destroy</code> MUST remove ZTS-owned network state without deleting or modifying runtime workloads.</p>
 <p>After destruction, a correctly-created Docker workload returns to <code>--network none</code> behavior.</p>
 <h3 id="7-6-up-controller">7.6 Up (controller)</h3>
-<p><code>up</code> applies, then reconciles again on every container <code>start</code> and <code>die</code> event. The controller is never in the packet path: stopping it leaves kernel state, routes and already-resolved names in place. In the Go core the per-profile resolvers are detached processes and outlive the controller; in the bash essentials they are children of the controller.</p>
+<p><code>up</code> applies, then reconciles again on every container <code>start</code> and <code>die</code> event, and when the manifest file changes (polled every two seconds; an invalid manifest is reported and the previous state stays applied). The controller is never in the packet path: stopping it leaves kernel state, routes and already-resolved names in place. In the Go core the per-profile resolvers are detached processes and outlive the controller; in the bash essentials they are children of the controller.</p>
 <hr>
 <h2 id="8-linux-provider">8. Linux provider</h2>
 <h3 id="8-1-workload-attachment">8.1 Workload attachment</h3>
@@ -241,10 +241,13 @@ credential     how a legacy/external system realizes authority</code></pre>
 <p>Reference commands:</p>
 <pre><code class="lang-text">zts.sh init     [manifest]   write a manifest from a preset
 zts.sh check    [manifest]   validate a manifest without root
+zts.sh edit     [manifest]   edit in $EDITOR; only a valid result is saved
+zts.sh show     [manifest]   print the manifest
+zts.sh load     [manifest]   replace the manifest from stdin, after validation
 zts.sh plan     [manifest]
 zts.sh apply    [manifest]
 zts.sh status   [manifest]
-zts.sh up       [manifest]   apply, then reconcile on container events
+zts.sh up       [manifest]   apply, then reconcile on container events and manifest changes
 zts.sh destroy  [manifest]
 zts.sh selftest</code></pre>
 <p>Two implementations exist and pass the same acceptance suite: the Go core (one static binary; the default container image) and the bash essentials (one readable file; <code>Dockerfile.bash</code>). Run as <code>--privileged --pid=host --network host</code> with the Docker socket, either creates the substrate namespace in the host's mount namespace so that state outlives the controller. This is the documented path for Docker Desktop, where the host is Docker's own Linux VM. Both refuse to operate if the namespace they open turns out to be the host's own.</p>

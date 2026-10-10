@@ -18,10 +18,13 @@
 # Commands:
 #   zts.sh init     [manifest]   write a manifest from a preset (asks once on a TTY)
 #   zts.sh check    [manifest]   validate a manifest without root
+#   zts.sh edit     [manifest]   open it in $EDITOR; only a valid result is saved
+#   zts.sh show     [manifest]   print it
+#   zts.sh load     [manifest]   replace it from stdin, after validation
 #   zts.sh plan     [manifest]
 #   zts.sh apply    [manifest]
 #   zts.sh status   [manifest]
-#   zts.sh up       [manifest]   apply, then reconcile on every container start/die
+#   zts.sh up       [manifest]   apply, then reconcile on container start/die and manifest change
 #   zts.sh destroy  [manifest]
 #   zts.sh selftest
 #
@@ -108,6 +111,9 @@ usage() {
 Usage:
   $PROGRAM init     [manifest.yaml]   write a manifest from a preset
   $PROGRAM check    [manifest.yaml]   validate a manifest (no root needed)
+  $PROGRAM edit     [manifest.yaml]   edit in \$EDITOR; only a valid result is saved
+  $PROGRAM show     [manifest.yaml]   print the manifest
+  $PROGRAM load     [manifest.yaml]   replace the manifest from stdin, after validation
   $PROGRAM plan     [manifest.yaml]
   $PROGRAM apply    [manifest.yaml]
   $PROGRAM status   [manifest.yaml]
@@ -518,6 +524,57 @@ validate_desired_graph() {
     [[ -n $t ]] || continue
     [[ $(transport_type "$t") != wireguard ]] || need_cmd wg
   done < <(transport_list)
+}
+
+# Validate a candidate file (no root, no Docker) without touching globals.
+check_file() {
+  ( MANIFEST=$1; check_manifest >/dev/null )
+}
+
+# edit / show / load: the manifest lives in a volume, so these are the
+# documented ways to change it without knowing where the volume is.
+run_show() {
+  [[ -f $MANIFEST ]] || die "manifest not found: $MANIFEST"
+  cat "$MANIFEST"
+}
+
+run_load() {
+  local tmp
+  tmp=$(mktemp)
+  cat > "$tmp"
+  if ! out=$(check_file "$tmp" 2>&1); then
+    rm -f "$tmp"
+    die "not saved: $out"
+  fi
+  mkdir -p "$(dirname "$MANIFEST")"
+  mv -f "$tmp" "$MANIFEST"
+  info "saved $MANIFEST"
+}
+
+run_edit() {
+  local tmp editor answer out
+  [[ -t 0 && -t 1 ]] || die "edit needs a terminal (docker run -it); use 'show' and 'load' otherwise"
+  editor=${EDITOR:-${VISUAL:-vi}}
+  tmp=$(mktemp --suffix=.yaml 2>/dev/null || mktemp)
+  if [[ -f $MANIFEST ]]; then cat "$MANIFEST" > "$tmp"; else preset_manifest coding-agent > "$tmp"; fi
+  while :; do
+    $editor "$tmp"
+    if out=$(check_file "$tmp" 2>&1); then
+      if [[ -f $MANIFEST ]] && cmp -s "$tmp" "$MANIFEST"; then
+        rm -f "$tmp"; info "no changes"; return 0
+      fi
+      mkdir -p "$(dirname "$MANIFEST")"
+      mv -f "$tmp" "$MANIFEST"
+      info "saved $MANIFEST"
+      return 0
+    fi
+    printf '\n%s\n\n' "$out" >&2
+    printf 'The manifest is invalid and was not saved. [r]eopen or [d]iscard? [r] ' >&2
+    read -r answer
+    case "${answer:-r}" in
+      d|D) rm -f "$tmp"; info "discarded"; return 1 ;;
+    esac
+  done
 }
 
 # `check`: validate a manifest with no root, no Docker and no kernel access.
@@ -1254,7 +1311,9 @@ destroy_state() {
 # ---------- up: reconcile on container events ----------
 
 reconcile_once() {
-  # Fresh inventory every time; everything above is idempotent.
+  # Fresh manifest and inventory every time; everything above is idempotent.
+  HAS_HOST_TRANSPORT=0; HOST_ALLOW_PRIVATE=false
+  validate_manifest
   IDENTITIES=(); PROFILES=()
   CID_BY_ID=(); PID_BY_ID=(); PROFILE_BY_ID=(); HOST_IP_BY_ID=(); WORKLOAD_IP_BY_ID=()
   ZIF_BY_ID=(); RESOLV_BY_ID=(); ID_BY_SLOT=(); TABLE_BY_PROFILE=(); PROFILE_BY_TABLE=()
@@ -1276,13 +1335,27 @@ run_up() {
   # by Docker instead of being missed.
   since=$(date +%s)
   ( reconcile_once ) || warn "initial reconcile failed; will retry on the next event"
+  local mtime rc
+  mtime=$(stat -c %Y "$MANIFEST" 2>/dev/null || echo 0)
   while :; do
     # The stream ends when Docker restarts; reconnect from where we left off.
-    while IFS= read -r line; do
-      [[ -n $line ]] || continue
-      info "event: $line"
-      since=$(date +%s)
-      ( reconcile_once ) || warn "reconcile failed; will retry on the next event"
+    # Between events, a changed manifest is applied within a couple of seconds.
+    while :; do
+      if IFS= read -r -t 2 line; then
+        [[ -n $line ]] || continue
+        info "event: $line"
+        since=$(date +%s)
+        ( reconcile_once ) || warn "reconcile failed; will retry on the next event"
+      else
+        rc=$?
+        (( rc > 128 )) || break
+      fi
+      if [[ $(stat -c %Y "$MANIFEST" 2>/dev/null || echo 0) != "$mtime" ]]; then
+        mtime=$(stat -c %Y "$MANIFEST" 2>/dev/null || echo 0)
+        info "manifest changed: $MANIFEST"
+        since=$(date +%s)
+        ( reconcile_once ) || warn "manifest rejected; the previous state stays applied"
+      fi
     done < <(curl -sN --unix-socket "$DOCKER_SOCK" -G 'http://docker/events' \
                --data-urlencode "since=$since" \
                --data-urlencode 'filters={"type":["container"],"event":["start","die"],"label":["zts.profile"]}' \
@@ -1442,6 +1515,9 @@ main() {
   case "$COMMAND" in
     selftest) need_cmd yq; selftest; exit 0 ;;
     check) need_cmd yq; check_manifest; exit 0 ;;
+    show) run_show; exit 0 ;;
+    load) need_cmd yq; run_load; exit 0 ;;
+    edit) need_cmd yq; run_edit; exit $? ;;
     init) run_init; exit 0 ;;
     plan|apply|status|destroy|up) ;;
     -h|--help|help|'') usage; exit 0 ;;

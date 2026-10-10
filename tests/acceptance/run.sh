@@ -18,8 +18,9 @@ nok()  { fail=$((fail+1)); say "not ok $n - $*"; }
 skp()  { skip=$((skip+1)); say "ok $n - $* # SKIP"; }
 t()    { n=$((n+1)); say "# $n: $1"; }
 
-PEER_PID=""; HOST_PID=""
+PEER_PID=""; HOST_PID=""; UP_PID=""
 cleanup() {
+  [[ -z $UP_PID ]] || kill "$UP_PID" 2>/dev/null || true
   [[ -z $PEER_PID ]] || kill "$PEER_PID" 2>/dev/null || true
   [[ -z $HOST_PID ]] || kill "$HOST_PID" 2>/dev/null || true
   docker ps -aq --filter name='^ztst-' | xargs -r docker rm -f >/dev/null 2>&1 || true
@@ -203,6 +204,50 @@ can_tcp ztst-lan "$HOST_IP" 2222       && r="$r lan->host:yes"     || r="$r lan-
 can_tcp ztst-lan "$HOST_IP" 80         && r="$r lan->host80:LEAK"  || r="$r lan->host80:no"
 can_tcp ztst-web "$HOST_IP" 2222       && r="$r web->host:LEAK"    || r="$r web->host:no"
 if [[ $r != *NO* && $r != *LEAK* ]]; then ok "guard holds for /0, explicit private CIDR passes"; else nok "cidr guard wrong:$r"; fi
+
+# ---------------------------------------------------------------- 16
+t "show/load: an invalid manifest is never saved, a valid one round-trips"
+cp "$TMP/m.yaml" "$TMP/orig.yaml"
+if ! printf 'version: 1\nprofiles:\n  x:\n    allow:\n      - { to: nope }\n' | "$ZTS" load "$TMP/m.yaml" >/dev/null 2>&1 \
+   && cmp -s "$TMP/m.yaml" "$TMP/orig.yaml" && "$ZTS" load "$TMP/m.yaml" < "$TMP/orig.yaml" >/dev/null 2>&1 \
+   && "$ZTS" show "$TMP/m.yaml" | cmp -s - "$TMP/orig.yaml"; then
+  ok "invalid rejected, original kept, show == load"; else nok "show/load wrong"; fi
+
+# ---------------------------------------------------------------- 17
+t "up applies a changed manifest without a restart"
+docker ps -aq --filter name='^ztst-' | xargs -r docker rm -f >/dev/null 2>&1
+"$ZTS" destroy "$TMP/m.yaml" >/dev/null 2>&1
+cat >"$TMP/m.yaml" <<YAML
+version: 1
+substrate: { namespace: ztst, pool: 100.64.0.0/10 }
+resources:
+  db: { workload: ztst-db }
+profiles:
+  db: { allow: [] }
+  app: { allow: [] }
+YAML
+run_c ztst-db db; run_c ztst-app app
+"$ZTS" up "$TMP/m.yaml" >"$TMP/up.log" 2>&1 &
+UP_PID=$!
+for _ in $(seq 1 40); do grep -q 'converged (2' "$TMP/up.log" && break; sleep 0.25; done
+start_listener ztst-db 5432; sleep 0.3
+before=0; can_tcp ztst-app "$(ip_of ztst-db)" 5432 && before=1
+cat >"$TMP/new.yaml" <<YAML
+version: 1
+substrate: { namespace: ztst, pool: 100.64.0.0/10 }
+resources:
+  db: { workload: ztst-db }
+profiles:
+  db: { allow: [] }
+  app:
+    allow:
+      - { to: db, protocol: tcp, ports: [5432] }
+YAML
+"$ZTS" load "$TMP/m.yaml" < "$TMP/new.yaml" >/dev/null 2>&1
+after=0
+for _ in $(seq 1 30); do can_tcp ztst-app "$(ip_of ztst-db)" 5432 && after=1 && break; sleep 0.3; done
+kill "$UP_PID" 2>/dev/null; wait "$UP_PID" 2>/dev/null || true
+if (( before == 0 && after == 1 )); then ok "relation appeared after load, no restart"; else nok "before=$before after=$after: $(tail -3 "$TMP/up.log" | tr '\n' ' ')"; fi
 
 say "1..$n"
 say "# pass=$pass fail=$fail skip=$skip"
