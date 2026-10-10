@@ -1,0 +1,25 @@
+{
+  "name": "zts-site",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ZTS site: JSX components rendered to static HTML at build time",
+  "type": "module",
+  "scripts": {
+    "build": "node web/build.mjs",
+    "check": "node web/build.mjs --check"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "preact": "^11.0.1",
+    "preact-render-to-string": "^6.8.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

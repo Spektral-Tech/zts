@@ -1,0 +1,4 @@
+bin/
+node_modules/
+web/.build/
+.DS_Store

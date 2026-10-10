@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="description" content="ZTS technical specification: trust model, invariants, manifest, reconciliation, Linux provider, implementation status."/><meta name="theme-color" content="#0b0b0b"/><title>ZTS — Technical Specification</title><link rel="stylesheet" href="styles.css?v=0.1.0"/><script defer src="app.js?v=0.1.0"></script></head><body class="page-spec"><a class="skip" href="#main">Skip to content</a><header class="topbar"><a class="brand" href="index.html" aria-label="ZTS home"><img class="brand-mark" src="brand-mark.png" alt width="288" height="165"/><span>ZTS</span></a><nav aria-label="Primary"><a href="index.html#start">Start</a><a href="index.html#model">Model</a><a href="index.html#manifesto">Manifesto</a><a href="reference.html">Docs</a><a href="spec.html" aria-current="page">Spec</a></nav><a class="quiet-link" href="https://github.com/Spektral-Tech/zts" rel="noopener">Source →</a></header><main id="main" class="doc"><p class="doc-source"><a href="SPEC.md" download>SPEC.md ↓</a></p><article><h1 id="zts-technical-specification">ZTS — Technical Specification</h1>
+<p><strong>Status:</strong> Draft 0.1.0 (pre-release) <strong>Implementation reference:</strong> Go core (<code>cmd/zts</code>) and <code>zts.sh</code> v0.2 (bash essentials), in parity <strong>Scope of this document:</strong> target architecture plus an explicit implementation-status boundary.</p>
+<p>RFC 2119-style terms <strong>MUST</strong>, <strong>SHOULD</strong>, and <strong>MAY</strong> indicate normative requirements.</p>
+<hr>
+<h2 id="1-purpose">1. Purpose</h2>
+<p>ZTS is a declarative network substrate for isolated workloads.</p>
+<p>A managed workload begins without connectivity. ZTS observes runtime identity and current kernel state, compares them to a desired manifest, and materializes only the network paths authorized for that workload.</p>
+<p>ZTS is designed so that an arbitrary unmodified container image can participate without an SDK, sidecar, injected agent, custom entrypoint, or application-level integration.</p>
+<hr>
+<h2 id="2-architectural-boundary">2. Architectural boundary</h2>
+<p>ZTS separates four concerns:</p>
+<pre><code class="lang-text">runtime inventory
+    identifies workload/netns
+            |
+            v
+desired-state manifest
+    declares relationships/capabilities
+            |
+            v
+reconciler
+    computes drift and materialization
+            |
+            v
+Linux dataplane
+    netns / veth / routes / nftables / WireGuard
+            |
+            +----&gt; optional L7 proxy</code></pre>
+<p>The runtime (Docker in the reference implementation) is an inventory source, not the ZTS source of network truth.</p>
+<p>The manifest is the desired state.</p>
+<p>The Linux kernel is the realized state.</p>
+<hr>
+<h2 id="3-trust-model">3. Trust model</h2>
+<h3 id="3-1-trusted">3.1 Trusted</h3>
+<p>The reference model trusts:</p>
+<ul><li>the host kernel;</li><li>root or the privileged actor applying ZTS state;</li><li>the manifest source and signing/approval process, when present;</li><li>private keys and proxy credentials within their designated trust boundaries.</li></ul>
+<h3 id="3-2-untrusted">3.2 Untrusted</h3>
+<p>ZTS MUST NOT require trust in:</p>
+<ul><li>application code inside a workload;</li><li>the container image behaving cooperatively;</li><li>workload source IP alone as proof of identity;</li><li>ambient LAN membership;</li><li>the presence of a workload inside a Docker bridge;</li><li>a transport carrier to enforce per-workload authorization.</li></ul>
+<h3 id="3-3-consequence-of-host-compromise">3.3 Consequence of host compromise</h3>
+<p>The base architecture does <strong>not</strong> protect ZTS from a malicious host root/kernel. A privileged host administrator can alter namespaces, routes, firewall rules, processes, and memory.</p>
+<p>Stronger separation requires moving sensitive authority to another VM/host/HSM/KMS boundary.</p>
+<hr>
+<h2 id="4-core-invariants">4. Core invariants</h2>
+<h3 id="zts-inv-001-no-ambient-network">ZTS-INV-001 — No ambient network</h3>
+<p>A managed workload MUST be created without ambient host/LAN/internet connectivity.</p>
+<p>For Docker, the reference binding is <code>--network none</code>.</p>
+<h3 id="zts-inv-002-unmodified-workload">ZTS-INV-002 — Unmodified workload</h3>
+<p>ZTS MUST NOT require modifications to the container image or application.</p>
+<h3 id="zts-inv-003-runtime-read-only-integration">ZTS-INV-003 — Runtime read-only integration</h3>
+<p>The reconciler SHOULD treat the container runtime as read-only inventory.</p>
+<p>It SHOULD NOT require <code>docker network connect</code>, container restart, runtime network mutation, or image changes.</p>
+<h3 id="zts-inv-004-fail-closed">ZTS-INV-004 — Fail closed</h3>
+<p>Absence or removal of ZTS materialized state MUST result in less connectivity, never more connectivity.</p>
+<h3 id="zts-inv-005-identity-is-provenance-not-authorization">ZTS-INV-005 — Identity is provenance, not authorization</h3>
+<p>A workload identity MUST only identify the source context used by policy. It MUST NOT imply unrestricted reachability.</p>
+<h3 id="zts-inv-006-declarative-desired-state">ZTS-INV-006 — Declarative desired state</h3>
+<p>A manifest MUST describe logical resources, relationships, profiles, grants, and transports. It SHOULD NOT expose provider-specific interface names, nftables chains, routing-table numbers, or veth commands as user-facing intent.</p>
+<h3 id="zts-inv-007-native-dataplane">ZTS-INV-007 — Native dataplane</h3>
+<p>Once materialized, ordinary packet forwarding SHOULD be performed by native kernel/network components rather than a custom always-on ZTS daemon.</p>
+<h3 id="zts-inv-008-no-mandatory-tls-interception">ZTS-INV-008 — No mandatory TLS interception</h3>
+<p>ZTS MUST NOT require MITM or counterfeit server identity. Direct TLS MUST remain end-to-end when policy chooses a real destination.</p>
+<h3 id="zts-inv-009-carrier-separation">ZTS-INV-009 — Carrier separation</h3>
+<p>A carrier such as Tailscale or an outer WireGuard link MAY transport ZTS traffic but MUST NOT be the sole definition of workload authorization.</p>
+<h3 id="zts-inv-010-explicit-l7-mediation">ZTS-INV-010 — Explicit L7 mediation</h3>
+<p>Application-layer proxies MAY apply additional policy where required. Workloads that do not require L7 mediation SHOULD be routed without it.</p>
+<hr>
+<h2 id="5-runtime-discovery">5. Runtime discovery</h2>
+<p>A runtime adapter discovers candidate workloads.</p>
+<p>For Docker, a managed container is selected by one label:</p>
+<pre><code class="lang-text">zts.profile=&lt;manifest profile&gt;          required
+zts.identity=&lt;stable logical identity&gt;  optional; defaults to the container name</code></pre>
+<p>The runtime is read through the Engine API on its Unix socket. No CLI is required.</p>
+<p>The adapter MUST obtain at least:</p>
+<ul><li>container/runtime identifier;</li><li>PID or network namespace handle;</li><li>logical identity;</li><li>profile/binding metadata;</li><li>lifecycle state.</li></ul>
+<p>The adapter MUST NOT assume a stable PID across restarts.</p>
+<p>A restarted workload with a new network namespace is drift and MUST be re-materialized.</p>
+<hr>
+<h2 id="6-desired-state-model">6. Desired-state model</h2>
+<p>The manifest describes logical desired state.</p>
+<h3 id="6-1-substrate">6.1 Substrate</h3>
+<pre><code class="lang-yaml">substrate:
+  namespace: zts
+  pool: 100.64.0.0/10</code></pre>
+<p><code>namespace</code> names the local Linux namespace used by the reference provider.</p>
+<p><code>pool</code> is address space available to the provider. Address allocation is an implementation detail and MUST NOT be treated as workload identity.</p>
+<p><code>resolvers</code> (optional, default <code>[1.1.1.1, 9.9.9.9]</code>) are the upstream resolvers used for name-based resources.</p>
+<h3 id="6-2-profiles">6.2 Profiles</h3>
+<p>A profile defines desired reachability for a class of workload.</p>
+<pre><code class="lang-yaml">profiles:
+  development:
+    allow:
+      - to: accounting-db
+        protocol: tcp
+        ports: [5432]
+
+      - to: internet
+        via: sandbox-egress
+        protocol: tcp
+        ports: [80, 443]</code></pre>
+<p>The profile expresses relationships, not Linux commands.</p>
+<h3 id="6-3-resources">6.3 Resources</h3>
+<p>A resource is a logical destination resolvable by the provider.</p>
+<p>Resource forms in v0.2:</p>
+<pre><code class="lang-yaml">resources:
+  accounting-db:
+    workload: accounting-db          # a managed workload on this host
+
+  internet:
+    cidrs: [0.0.0.0/0]               # IPv4 address space
+
+  github:
+    names: [github.com, "*.github.com"]   # DNS names; a name covers its subdomains; "*" is any name</code></pre>
+<p><strong>Names without a proxy.</strong> A workload's only resolver is its ZTS gateway. Per profile, that resolver answers only the names its profile declares; any other name is NXDOMAIN (absence, not rejection). Each answer feeds the resolved addresses into a kernel set that the forwarding policy references. The application sees ordinary DNS and ordinary TLS to the real peer. No proxy, no CA, no environment variable, no SNI inspection.</p>
+<p>Consequences:</p>
+<ul><li>A raw address that was never resolved for a declared name has no path.</li><li>All name-based relations of a profile MUST use the same transport.</li><li>Addresses inside private, link-local or multicast space resolved for a name are dropped by the host transport guard (see §8.5), which closes DNS rebinding.</li></ul>
+<p>Future resource resolvers MAY support service discovery, remote workload identities, dynamic inventories, capability sets, or external provider APIs.</p>
+<h3 id="6-4-transports">6.4 Transports</h3>
+<p>A transport is a permitted carrier/next-hop implementation.</p>
+<p>Transport types in v0.2:</p>
+<pre><code class="lang-yaml">transports:
+  host:
+    type: host              # leave through this host's default route (NAT)
+    allow_private: false    # optional; lifts the private-space guard
+
+  sandbox-egress:
+    type: wireguard
+    address: 10.255.255.2/32
+    private_key_file: /etc/zts/sandbox-egress.key
+    peer:
+      public_key: ...
+      endpoint: 192.0.2.10:51820
+      allowed_ips:
+        - 0.0.0.0/0</code></pre>
+<p>A transport is not a workload permission by itself. Profiles/grants determine which workloads may use it.</p>
+<p><code>type: host</code> is the default of a first install: it requires nothing beyond the kernel. WireGuard is optional and only needed when a <code>wireguard</code> transport is declared.</p>
+<hr>
+<h2 id="7-reconciliation-semantics">7. Reconciliation semantics</h2>
+<p>The reconciler operates conceptually as:</p>
+<pre><code class="lang-text">D = desired(manifest, runtime inventory)
+A = actual(kernel state)
+P = diff(A, D)
+apply(P)
+verify(actual == desired)</code></pre>
+<h3 id="7-1-properties">7.1 Properties</h3>
+<p>Reconciliation SHOULD be:</p>
+<ul><li>idempotent;</li><li>deterministic for identical inputs;</li><li>fail-closed on partial failure;</li><li>explicit about destructive operations;</li><li>capable of garbage-collecting orphaned provider state;</li><li>safe against concurrent invocations or guarded by a lock.</li></ul>
+<h3 id="7-2-plan">7.2 Plan</h3>
+<p><code>plan</code> SHOULD report intended changes without mutation.</p>
+<h3 id="7-3-apply">7.3 Apply</h3>
+<p><code>apply</code> MUST mutate only ZTS-owned state required to converge desired state.</p>
+<h3 id="7-4-status">7.4 Status</h3>
+<p><code>status</code> SHOULD report workload bindings, unresolved resources, drift, transports, and materialization health.</p>
+<h3 id="7-5-destroy">7.5 Destroy</h3>
+<p><code>destroy</code> MUST remove ZTS-owned network state without deleting or modifying runtime workloads.</p>
+<p>After destruction, a correctly-created Docker workload returns to <code>--network none</code> behavior.</p>
+<h3 id="7-6-up-controller">7.6 Up (controller)</h3>
+<p><code>up</code> applies, then reconciles again on every container <code>start</code> and <code>die</code> event. The controller is never in the packet path: stopping it leaves kernel state, routes and already-resolved names in place. In the Go core the per-profile resolvers are detached processes and outlive the controller; in the bash essentials they are children of the controller.</p>
+<hr>
+<h2 id="8-linux-provider">8. Linux provider</h2>
+<h3 id="8-1-workload-attachment">8.1 Workload attachment</h3>
+<p>For a managed workload, the provider SHOULD:</p>
+<ol><li>discover its network namespace;</li><li>create a veth pair;</li><li>move the workload end into the workload namespace;</li><li>attach the substrate end to the ZTS namespace/provider topology;</li><li>configure addresses and routes;</li><li>install anti-spoofing and authorization rules;</li><li>verify reachability matches desired state.</li></ol>
+<p>The workload MUST NOT receive <code>CAP_NET_ADMIN</code> merely to participate in ZTS.</p>
+<h3 id="8-2-identity-binding">8.2 Identity binding</h3>
+<p>On a single host, ingress interface provenance MAY be used as a strong local binding between kernel-created endpoint and workload identity.</p>
+<p>Source IP MUST NOT be the only identity proof used by policy.</p>
+<h3 id="8-3-nftables">8.3 nftables</h3>
+<p>The default forwarding policy MUST be deny.</p>
+<p>Explicit allow rules SHOULD be generated from desired relations.</p>
+<p>Established/related return traffic MAY be allowed through conntrack.</p>
+<p>Anti-spoofing rules SHOULD constrain traffic from each workload endpoint to its assigned provider address set.</p>
+<h3 id="8-4-routing">8.4 Routing</h3>
+<p>Routes and policy-routing tables are provider materialization details.</p>
+<p>Default routing MUST NOT accidentally expose host/LAN/WAN connectivity.</p>
+<h3 id="8-5-host-transport-and-the-private-space-guard">8.5 Host transport and the private-space guard</h3>
+<p>A <code>host</code> transport attaches the substrate namespace to the host through a dedicated veth link and masquerades the workload pool out of the host's default route. The guard applies to everything leaving by that link: destinations in <code>0.0.0.0/8</code>, <code>10.0.0.0/8</code>, <code>100.64.0.0/10</code>, <code>127.0.0.0/8</code>, <code>169.254.0.0/16</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>, <code>224.0.0.0/4</code> and <code>240.0.0.0/4</code> are dropped unless a resource declares a CIDR that lies entirely inside one of those ranges, or the transport sets <code>allow_private: true</code>. <code>0.0.0.0/0</code> does not count as declaring private space.</p>
+<h3 id="8-6-wireguard">8.6 WireGuard</h3>
+<p>WireGuard is a transport mechanism, not the ZTS authorization engine.</p>
+<p>A WireGuard interface MAY be created in the host namespace and moved into the ZTS namespace so that its encrypted UDP socket retains access to the host underlay while plaintext exists only inside the substrate namespace.</p>
+<p>ZTS MAY use WireGuard for:</p>
+<ul><li>remote ZTS host links;</li><li>isolated egress gateways;</li><li>proxy gateways;</li><li>encrypted overlays carried over another transport.</li></ul>
+<hr>
+<h2 id="9-proxies">9. Proxies</h2>
+<p>A proxy is an optional policy boundary reached through ZTS routing.</p>
+<p>A proxy MAY provide:</p>
+<ul><li>HTTP/API policy;</li><li>credential brokerage/injection;</li><li>secret isolation;</li><li>method/resource restrictions;</li><li>audit logging;</li><li>rate limits;</li><li>protocol translation;</li><li>sandbox substitution where the application protocol allows it.</li></ul>
+<p>A proxy MUST NOT be required for traffic that only needs L3/L4 authorization.</p>
+<p>A proxy holding external credentials SHOULD be unreachable except through explicitly materialized ZTS paths.</p>
+<hr>
+<h2 id="10-tls-behavior">10. TLS behavior</h2>
+<p>ZTS distinguishes routing from cryptographic peer identity.</p>
+<p>If a workload connects to the real <code>api.github.com</code>, normal end-to-end TLS can remain intact.</p>
+<p>If policy redirects an application to an alternate service, that alternate MUST satisfy whatever cryptographic validation the application performs. ZTS does not require installing a private CA or intercepting arbitrary TLS.</p>
+<p>Therefore:</p>
+<pre><code class="lang-text">real destination + strict TLS      -&gt; supported
+no route                            -&gt; supported
+alternate destination when client accepts it -&gt; supported
+transparent counterfeit TLS peer   -&gt; out of scope</code></pre>
+<hr>
+<h2 id="11-multi-host-and-carrier-layering">11. Multi-host and carrier layering</h2>
+<p>Two ZTS environments MAY be joined over any carrier capable of transporting the chosen ZTS link.</p>
+<p>Example:</p>
+<pre><code class="lang-text">workload A
+   |
+ZTS host A
+   |
+inner WireGuard / ZTS ciphertext
+   |
+Tailscale subnet/carrier
+   |
+ZTS host B
+   |
+workload B</code></pre>
+<p>The carrier sees only the outer transport-level relationship and whatever routing metadata is inherently exposed by that carrier.</p>
+<p>ZTS policy remains responsible for workload-to-resource authorization.</p>
+<p>A Tailscale deployment MAY therefore use coarse subnet/host connectivity while avoiding duplication of the full per-workload ZTS authorization model in Tailscale ACLs/grants.</p>
+<p>Multiple carrier instances MAY be isolated in separate network namespaces, allowing one host to carry ZTS paths through different tailnets/accounts without making workloads members of those tailnets.</p>
+<hr>
+<h2 id="12-secret-and-capability-model">12. Secret and capability model</h2>
+<p>Target architecture distinguishes:</p>
+<pre><code class="lang-text">identity       who originated the request/context
+capability     what effect may be requested
+route          where that request may travel
+mediation      how extra policy is applied
+credential     how a legacy/external system realizes authority</code></pre>
+<p>Workloads SHOULD receive capabilities rather than raw long-lived credentials where a proxy can safely mediate the external protocol.</p>
+<p>This is target architecture; <code>zts.sh</code> v0 does not yet implement signed capability grants or credential brokerage.</p>
+<hr>
+<h2 id="13-manifest-validation">13. Manifest validation</h2>
+<p>A reconciler MUST reject a manifest when:</p>
+<ul><li>referenced profiles/resources/transports do not exist;</li><li>address spaces are invalid;</li><li>required transport key material is absent;</li><li>conflicting materializations would cause ambiguous routing;</li><li>a desired relation cannot be represented safely by the selected provider.</li></ul>
+<p>Unknown fields SHOULD be rejected or explicitly namespaced for forward compatibility rather than silently ignored.</p>
+<hr>
+<h2 id="14-drift">14. Drift</h2>
+<p>The following are examples of drift:</p>
+<ul><li>a managed container restarted and has a new netns;</li><li>a required veth disappeared;</li><li>an nftables rule was modified manually;</li><li>a transport interface is absent;</li><li>a profile changed;</li><li>a managed workload disappeared but provider state remains;</li><li>a new labeled workload appeared with no materialized endpoint.</li></ul>
+<p>The next reconcile MUST move actual state toward desired state without requiring container recreation.</p>
+<hr>
+<h2 id="15-reference-cli">15. Reference CLI</h2>
+<p>Reference commands:</p>
+<pre><code class="lang-text">zts.sh init     [manifest]   write a manifest from a preset
+zts.sh check    [manifest]   validate a manifest without root
+zts.sh plan     [manifest]
+zts.sh apply    [manifest]
+zts.sh status   [manifest]
+zts.sh up       [manifest]   apply, then reconcile on container events
+zts.sh destroy  [manifest]
+zts.sh selftest</code></pre>
+<p>Two implementations exist and pass the same acceptance suite: the Go core (one static binary; the default container image) and the bash essentials (one readable file; <code>Dockerfile.bash</code>). Run as <code>--privileged --pid=host --network host</code> with the Docker socket, either creates the substrate namespace in the host's mount namespace so that state outlives the controller. This is the documented path for Docker Desktop, where the host is Docker's own Linux VM. Both refuse to operate if the namespace they open turns out to be the host's own.</p>
+<p>A future implementation MAY replace Bash with another ephemeral reconciler while preserving the same architecture and invariants.</p>
+<p>A future implementation SHOULD NOT become an always-on privileged dataplane daemon merely for convenience.</p>
+<hr>
+<h2 id="16-current-v0-2-implementation-status">16. Current v0.2 implementation status</h2>
+<p>Implemented in both the Go core and the bash essentials:</p>
+<ul><li>Docker discovery by label through the Engine API (read-only);</li><li>IPv4;</li><li>deterministic workload endpoint allocation from a pool;</li><li>Linux network namespace/veth materialization;</li><li>deny-first nftables policy with per-endpoint anti-spoofing;</li><li>same-host workload resources;</li><li>CIDR resources;</li><li>name-based resources via per-profile gateway resolvers and kernel sets (no proxy);</li><li><code>host</code> transport with the private-space guard;</li><li>WireGuard transports;</li><li>convergence detection (<code>plan</code> reports <code>No changes.</code> on converged state);</li><li><code>init</code> presets, <code>check</code>, <code>plan</code>, <code>apply</code>, <code>status</code>, <code>up</code>, <code>destroy</code>, <code>selftest</code>;</li><li>container image for Linux and Docker Desktop;</li><li>nothing in the packet path after apply;</li><li>resolvers that outlive the controller (Go core only).</li></ul>
+<p>Not yet implemented:</p>
+<ul><li>signed grants/certificates;</li><li>dynamic service discovery;</li><li>Tailscale and Cloudflare transport adapters;</li><li>multiple Linux provider namespaces/carrier namespaces;</li><li>L7 proxy implementation;</li><li>secret brokerage;</li><li>IPv6;</li><li>durable state journal/transactional rollback;</li><li>formal manifest schema file;</li><li>OCI/containerd/Podman/Incus runtime adapters;</li><li>Docker Desktop with Enhanced Container Isolation (blocks <code>--pid=host</code>).</li></ul>
+<hr>
+<h2 id="17-minimum-acceptance-tests">17. Minimum acceptance tests</h2>
+<p>A conforming prototype SHOULD demonstrate at least:</p>
+<ol><li>An arbitrary <code>--network none</code> container gains a ZTS-managed interface without image modification.</li><li>Docker remains unmodified by ZTS network operations.</li><li>A workload with an empty profile cannot reach host, LAN, another workload, or internet.</li><li>An explicit same-host relation enables only the declared protocol/port.</li><li>A transport-bound relation exits only through the declared transport.</li><li>Removing ZTS state returns the workload to no connectivity.</li><li>Re-running reconciliation produces no changes when desired and actual state already match.</li><li>Restarting a labeled container is detected as drift and reattached on the next reconcile.</li><li>A workload cannot gain new reachability by spoofing another workload's source address.</li><li>No ZTS-specific process must remain inside a workload after reconciliation.</li></ol>
+<hr>
+<h2 id="18-design-test">18. Design test</h2>
+<p>When evaluating a proposed feature, ask:</p>
+<blockquote><p>Does this need to become a new ZTS service, or can it remain declarative intent compiled into a primitive the platform already provides?</p></blockquote>
+<p>Prefer the latter until proven insufficient.</p>
+</article></main><footer><span>ZTS · BY SPEKTRAL TECH</span><span><a href="reference.html">DOCS</a> · <a href="spec.html">SPEC</a> · <a href="index.html#manifesto">MANIFESTO</a></span><span>© 2026 Spektral Tech · Apache-2.0 · Trust the state — not us, not a daemon.</span></footer></body></html>

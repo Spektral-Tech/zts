@@ -1,0 +1,29 @@
+name: acceptance
+on: [push, pull_request]
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q nftables wireguard-tools dnsmasq jq
+          sudo systemctl disable --now dnsmasq || true
+          sudo curl -fsSL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq
+          sudo chmod +x /usr/local/bin/yq
+      - name: build go core
+        run: go build -o bin/zts ./cmd/zts
+      - name: acceptance suite (bash essentials)
+        run: sudo tests/acceptance/run.sh
+      - name: acceptance suite (go core)
+        run: sudo ZTS_BIN=./bin/zts tests/acceptance/run.sh
+      - name: controller image (go)
+        run: docker build -t zts:ci .
+      - name: two minutes (non-interactive)
+        run: ZTS_PRESET=coding-agent ZTS_IMAGE=zts:ci scripts/two-minutes.sh
+      - name: controller image (bash essentials)
+        run: docker build -f Dockerfile.bash -t zts:bash . && ZTS_PRESET=coding-agent ZTS_IMAGE=zts:bash scripts/two-minutes.sh

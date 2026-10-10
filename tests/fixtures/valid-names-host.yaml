@@ -1,0 +1,9 @@
+version: 1
+transports:
+  host: { type: host }
+resources:
+  github: { names: [github.com, "*.github.com"] }
+profiles:
+  dev:
+    allow:
+      - { to: github, via: host, protocol: tcp, ports: [443] }

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><meta name="description" content="ZTS reference: install, command line, zts.yaml, scenarios, what to expect, running without the image."/><meta name="theme-color" content="#0b0b0b"/><title>ZTS — Docs</title><link rel="stylesheet" href="styles.css?v=0.1.0"/><script defer src="app.js?v=0.1.0"></script></head><body class="page-docs"><a class="skip" href="#main">Skip to content</a><header class="topbar"><a class="brand" href="index.html" aria-label="ZTS home"><img class="brand-mark" src="brand-mark.png" alt width="288" height="165"/><span>ZTS</span></a><nav aria-label="Primary"><a href="index.html#start">Start</a><a href="index.html#model">Model</a><a href="index.html#manifesto">Manifesto</a><a href="reference.html" aria-current="page">Docs</a><a href="spec.html">Spec</a></nav><a class="quiet-link" href="https://github.com/Spektral-Tech/zts" rel="noopener">Source →</a></header><main id="main" class="doc"><p class="doc-source"><a href="REFERENCE.md" download>REFERENCE.md ↓</a></p><article><h1 id="zts-reference">ZTS — Reference</h1>
+<p>How to run ZTS, what the manifest can say, and what to expect. The model is in the manifesto; the normative detail is in the spec. This page is the practical side.</p>
+<h2 id="install-and-first-run">Install and first run</h2>
+<p>Only Docker is needed, on Linux or on a Mac with Docker Desktop.</p>
+<pre><code class="lang-text">docker run --rm -it -v zts:/etc/zts ghcr.io/spektral-tech/zts init
+docker run -d --name zts --restart unless-stopped --privileged --pid=host --network host \
+    -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts ghcr.io/spektral-tech/zts up</code></pre>
+<p><code>init</code> asks one question (coding agents, web development, or nothing) and writes <code>zts.yaml</code> into the <code>zts</code> volume. <code>up</code> starts the controller: it applies the manifest, then reacts to every container start and stop.</p>
+<p>From then on, a managed container is any container started with <code>--network none</code> and one label:</p>
+<pre><code class="lang-text">docker run -d --name agent --network none --label zts.profile=dev alpine sleep infinity
+docker exec agent wget -qO- https://api.github.com/zen</code></pre>
+<p>Why the controller container runs the way it does:</p>
+<ul><li><code>--privileged --pid=host</code>: it reaches the kernel of the Docker host. On Docker Desktop that host is Docker's own Linux VM.</li><li><code>--network host</code>: the host transport and the WireGuard sockets live in the host namespace.</li><li>the Docker socket: inventory only. ZTS never starts, stops or connects a container.</li><li><code>-v zts:/etc/zts</code>: the manifest, and WireGuard keys if you use them.</li></ul>
+<p>Docker Desktop with Enhanced Container Isolation turned on blocks <code>--pid=host</code>; ZTS stops with a clear message and does not try to work around it.</p>
+<h2 id="labels">Labels</h2>
+<pre><code class="lang-text">zts.profile=&lt;profile&gt;     required: which profile of the manifest applies
+zts.identity=&lt;name&gt;       optional: a stable identity; defaults to the container name</code></pre>
+<p>Identity decides the workload's address, which is derived from it and stable across restarts. Two running containers cannot share an identity.</p>
+<h2 id="the-command-line">The command line</h2>
+<p>The same commands exist in the image and in the standalone binaries.</p>
+<pre><code class="lang-text">zts init     [manifest]   write a manifest from a preset; asks once on a TTY, or use ZTS_PRESET
+zts check    [manifest]   validate a manifest; no root, no Docker
+zts plan     [manifest]   show what apply would change; "No changes." when converged
+zts apply    [manifest]   converge kernel state once and exit
+zts status   [manifest]   workloads, transports, converged or drift
+zts up       [manifest]   apply, then reconcile on container start/die events
+zts destroy  [manifest]   remove all ZTS state; workloads fall back to no network
+zts selftest              pure checks: allocation, names, presets</code></pre>
+<p>The manifest defaults to <code>/etc/zts/zts.yaml</code> when that directory exists, else <code>./zts.yaml</code>.</p>
+<p>Through the image:</p>
+<pre><code class="lang-text">docker exec zts zts status
+docker exec zts zts plan
+docker restart zts                  # re-read the manifest now
+docker logs zts                     # every event and reconciliation
+docker run --rm --privileged --pid=host --network host \
+    -v /var/run/docker.sock:/var/run/docker.sock -v zts:/etc/zts ghcr.io/spektral-tech/zts destroy</code></pre>
+<h2 id="zts-yaml">zts.yaml</h2>
+<pre><code class="lang-yaml">version: 1
+
+substrate:
+  namespace: zts                    # the Linux namespace ZTS owns
+  pool: 100.64.0.0/10               # addresses for workloads; a /30 per identity
+  resolvers: [1.1.1.1, 9.9.9.9]     # upstream DNS for name-based resources
+
+transports:
+  host:
+    type: host                      # leave through this host's default route
+    allow_private: false            # keep private, link-local and multicast unreachable
+  sandbox-egress:
+    type: wireguard
+    address: 10.255.255.2/32
+    private_key_file: /etc/zts/sandbox-egress.key
+    peer:
+      public_key: ...
+      endpoint: 192.0.2.10:51820
+      allowed_ips: [0.0.0.0/0]
+      persistent_keepalive: 25
+
+resources:
+  accounting-db:
+    workload: accounting-db         # another managed container on this host
+  github:
+    names: [github.com, "*.github.com", "*.githubusercontent.com"]
+  internet:
+    cidrs: [0.0.0.0/0]
+  office-printer:
+    cidrs: [192.168.1.40/32]
+
+profiles:
+  isolated:
+    allow: []
+  dev:
+    allow:
+      - { to: accounting-db, protocol: tcp, ports: [5432] }
+      - { to: github,        via: host, protocol: tcp, ports: [443] }</code></pre>
+<h3 id="substrate">substrate</h3>
+<p><code>namespace</code> names the Linux network namespace that holds every ZTS object. <code>pool</code> is carved into one /30 per identity, derived from the identity's hash, so there is no state file. <code>resolvers</code> are reached through the host transport.</p>
+<h3 id="transports">transports</h3>
+<p>A transport is a way out. Declaring one grants nothing; a profile has to name it.</p>
+<ul><li><code>host</code>: NAT through the host's own default route. Private (<code>10/8</code>, <code>172.16/12</code>, <code>192.168/16</code>), carrier-grade (<code>100.64/10</code>), loopback, link-local and multicast destinations are dropped unless a resource declares a CIDR inside one of those ranges, or <code>allow_private: true</code>. <code>0.0.0.0/0</code> does not count as declaring private space. This is also what stops DNS rebinding.</li><li><code>wireguard</code>: an authenticated tunnel to a remote gateway. The interface is created on the host and moved into the namespace, so its UDP socket keeps the host's underlay while plaintext exists only inside ZTS. The remote peer must route the pool back through the tunnel.</li></ul>
+<h3 id="resources">resources</h3>
+<p>A resource is a logical destination.</p>
+<ul><li><code>workload</code>: another managed container, by identity. No <code>via</code>: it is local.</li><li><code>cidrs</code>: IPv4 ranges. Needs <code>via</code>.</li><li><code>names</code>: DNS names. A name covers its subdomains; <code>"*"</code> means any name. Needs <code>via</code>. All name-based resources of one profile must use the same transport.</li></ul>
+<p>How names work without a proxy: the workload's only DNS server is its gateway. For each profile, that resolver answers only declared names and feeds the addresses it returns into a kernel set that the forwarding policy references. Undeclared names get NXDOMAIN. A raw address that was never returned for a declared name has no path. TLS stays end to end; there is no certificate to install and no environment variable to set.</p>
+<h3 id="profiles">profiles</h3>
+<p>A profile is a list of <code>allow</code> relations:</p>
+<pre><code class="lang-yaml">- { to: &lt;resource&gt;, via: &lt;transport&gt;, protocol: tcp|udp|any, ports: [..] }</code></pre>
+<p><code>via</code> is required for CIDR and name resources, forbidden for workload resources. <code>ports</code> require <code>tcp</code> or <code>udp</code>. An empty <code>allow</code> is a workload with no network.</p>
+<h2 id="scenarios">Scenarios</h2>
+<p><strong>A coding agent that may reach GitHub, package registries and model APIs, port 443 only.</strong> The <code>coding-agent</code> preset. Everything else, including the host and the LAN, is unreachable.</p>
+<p><strong>Web development: any public name, web ports only.</strong> The <code>web-dev</code> preset: <code>names: ["*"]</code> via host on 80 and 443. Host, LAN and link-local stay closed.</p>
+<p><strong>Two workloads that talk to each other, nothing else.</strong></p>
+<pre><code class="lang-yaml">resources:
+  db: { workload: db }
+profiles:
+  app:
+    allow:
+      - { to: db, protocol: tcp, ports: [5432] }
+  db:
+    allow: []</code></pre>
+<p>Start <code>db</code> with <code>--label zts.profile=db</code> and the app with <code>--label zts.profile=app</code>. The relation is one-way: <code>db</code> cannot open connections to the app.</p>
+<p><strong>One LAN device, explicitly.</strong></p>
+<pre><code class="lang-yaml">resources:
+  printer: { cidrs: [192.168.1.40/32] }
+profiles:
+  print:
+    allow:
+      - { to: printer, via: host, protocol: tcp, ports: [9100] }</code></pre>
+<p>The private-space guard lets this through because the CIDR lies entirely inside private space and was named on purpose.</p>
+<p><strong>Everything through a remote gateway.</strong> Declare a <code>wireguard</code> transport and use <code>via: &lt;its name&gt;</code> on <code>internet</code> or on name-based resources. The gateway sees only that tunnel, never your LAN.</p>
+<p><strong>Something that must stay offline.</strong> <code>isolated</code> is in every preset: <code>allow: []</code>. The container has <code>lo</code> and an <code>eth0</code> that leads nowhere.</p>
+<h2 id="what-to-expect">What to expect</h2>
+<ul><li>A container's process starts together with its network namespace; the controller attaches on the <code>start</code> event a moment later, typically under a second. Long-running workloads never notice. A one-shot <code>docker run ... wget</code> can race that moment: prove things with <code>docker exec</code>, or let the command retry.</li><li><code>docker inspect</code> keeps reporting <code>NetworkMode=none</code>. Docker is inventory, not authority.</li><li>Stopping the controller leaves kernel state, routes and already-resolved names in place. In the Go core, the resolvers are separate processes and keep answering; in the bash essentials they stop with the controller.</li><li><code>destroy</code> removes the namespace and everything in it. Workloads fall back to no network.</li><li>Inspect the native state yourself: <code>nsenter --net=/run/netns/zts nft list ruleset</code>, <code>ip -n zts route show table &lt;n&gt;</code>, <code>ip -n zts rule</code>. The controller is not in the packet path; those objects are the whole mechanism.</li></ul>
+<h2 id="running-without-the-image">Running without the image</h2>
+<h3 id="go-core">Go core</h3>
+<pre><code class="lang-text">go build -o bin/zts ./cmd/zts
+./bin/zts check zts.yaml
+sudo ./bin/zts apply zts.yaml</code></pre>
+<p>Needs <code>nft</code> on the host, and <code>iptables</code> when Docker manages the host firewall (ZTS opens Docker's <code>DOCKER-USER</code> chain for its link).</p>
+<h3 id="bash-essentials">Bash essentials</h3>
+<p><code>zts.sh</code> is the readable reference: one file that does the most with the least. It is kept in parity with the Go core and passes the same acceptance suite.</p>
+<p>Dependencies: bash 4+, curl, jq, Mike Farah <code>yq</code> v4, iproute2, nftables, <code>nsenter</code>, <code>flock</code>; <code>dnsmasq</code> built with nftset support for name-based resources; <code>wireguard-tools</code> for WireGuard transports.</p>
+<pre><code class="lang-text">./zts.sh selftest
+./zts.sh check zts.yaml
+sudo ./zts.sh apply zts.yaml
+sudo ./zts.sh status zts.yaml
+sudo ./zts.sh up zts.yaml</code></pre>
+<p>Read it top to bottom; every kernel object it creates is named there. <code>Dockerfile.bash</code> packages it with its tools, including a dnsmasq compiled with nftset.</p>
+<h2 id="verifying-a-checkout">Verifying a checkout</h2>
+<pre><code class="lang-text">scripts/run-checks.sh            # lint, selftests, fixtures, go test, site; acceptance when root+nft+docker
+sudo tests/acceptance/run.sh     # the spec's acceptance tests plus names, on Linux
+scripts/two-minutes.sh           # the quickstart, timed, with a host-namespace cleanliness check</code></pre>
+<p>The acceptance suite runs against either implementation: <code>ZTS_BIN=./bin/zts tests/acceptance/run.sh</code>.</p>
+</article></main><footer><span>ZTS · BY SPEKTRAL TECH</span><span><a href="reference.html">DOCS</a> · <a href="spec.html">SPEC</a> · <a href="index.html#manifesto">MANIFESTO</a></span><span>© 2026 Spektral Tech · Apache-2.0 · Trust the state — not us, not a daemon.</span></footer></body></html>

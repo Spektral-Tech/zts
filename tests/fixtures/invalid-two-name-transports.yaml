@@ -1,0 +1,16 @@
+version: 1
+transports:
+  host: { type: host }
+  wg:
+    type: wireguard
+    address: 10.255.255.2/32
+    private_key_file: /etc/zts/wg.key
+    peer: { public_key: x, endpoint: 192.0.2.10:51820, allowed_ips: [0.0.0.0/0] }
+resources:
+  a: { names: [a.example.com] }
+  b: { names: [b.example.com] }
+profiles:
+  dev:
+    allow:
+      - { to: a, via: host }
+      - { to: b, via: wg }

@@ -1,0 +1,7 @@
+version: 1
+resources:
+  github: { names: [github.com] }
+profiles:
+  dev:
+    allow:
+      - { to: github, protocol: tcp, ports: [443] }

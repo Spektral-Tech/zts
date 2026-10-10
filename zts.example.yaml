@@ -1,0 +1,68 @@
+# ZTS manifest: the network each workload is allowed to perceive.
+# Attach a container with:
+#   docker run --network none --label zts.profile=<profile> ...
+# Identity defaults to the container name; set zts.identity=<name> to pin it.
+version: 1
+
+substrate:
+  # Owned entirely by ZTS. No host or LAN interface lives here.
+  namespace: zts
+  # Workload point-to-point /30s are derived from identity, so addressing is
+  # stable across restarts without a state file.
+  pool: 100.64.0.0/10
+  # Upstream resolvers for name-based resources (reached through the host transport).
+  resolvers: [1.1.1.1, 9.9.9.9]
+
+# Transports are the ways out of the substrate. A profile must name one for
+# every non-local resource; a transport by itself grants nothing.
+transports:
+  # Leave through this host's own default route (NAT). Private, link-local and
+  # multicast destinations are never reachable this way unless a resource
+  # declares them as CIDRs. Set allow_private: true to lift that guard.
+  host:
+    type: host
+
+  # An authenticated path to a remote gateway. The WireGuard socket stays in the
+  # host namespace; plaintext exists only inside the substrate namespace.
+  # The remote peer must route the workload pool back through this tunnel.
+  sandbox-egress:
+    type: wireguard
+    address: 10.255.255.2/32
+    private_key_file: /etc/zts/sandbox-egress.key
+    peer:
+      public_key: REPLACE_WITH_SANDBOX_EGRESS_PUBLIC_KEY
+      endpoint: 192.0.2.10:51820
+      allowed_ips: [0.0.0.0/0]
+      persistent_keepalive: 25
+
+# Resources are logical destinations. v1 resolves them to a same-host workload,
+# to IPv4 CIDRs, or to DNS names. A name covers its subdomains; "*" is any name.
+# Name-based reachability needs no proxy: the workload's resolver answers only
+# declared names and the resolved addresses become the authorization.
+resources:
+  accounting-db:
+    workload: accounting-db
+
+  github:
+    names: [github.com, "*.github.com", "*.githubusercontent.com"]
+
+  package-registries:
+    names: [registry.npmjs.org, pypi.org, files.pythonhosted.org, proxy.golang.org]
+
+  internet:
+    cidrs: [0.0.0.0/0]
+
+profiles:
+  isolated:
+    allow: []
+
+  dev:
+    allow:
+      - { to: accounting-db,      protocol: tcp, ports: [5432] }
+      - { to: github,             via: host, protocol: tcp, ports: [443] }
+      - { to: package-registries, via: host, protocol: tcp, ports: [443] }
+
+  release:
+    allow:
+      - { to: accounting-db, protocol: tcp, ports: [5432] }
+      - { to: internet,      via: sandbox-egress, protocol: tcp, ports: [80, 443] }

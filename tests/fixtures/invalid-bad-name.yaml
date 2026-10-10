@@ -1,0 +1,9 @@
+version: 1
+transports:
+  host: { type: host }
+resources:
+  x: { names: ["not a name"] }
+profiles:
+  dev:
+    allow:
+      - { to: x, via: host }
